@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------------- */
 /* Project: HEAL 																	*/
-/* PI: Kira Bradford, Becky Boyles													*/
+/* PI: Kira Bradford													*/
 /* Program: HEAL_99_QC																*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/05/07															*/
