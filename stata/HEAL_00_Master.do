@@ -4,16 +4,18 @@
 /* Program: HEAL_00_Master															*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/02/29															*/
-/* Date Last Updated: 2024/12/04													*/
+/* Date Last Updated: 2025/01/24													*/
 /* Description:	This is the master Stata program for MySQL data processing. It sets	*/
 /* global macros before calling the following programs:								*/
 /*		1. Import & merge data														*/
-/*		2. Generate Research Networks Table											*/
+/*		2. Generate Research Networks Documentation Tables							*/
 /*		3. Generate Study Table														*/
 /*		4. Generate CTN crosswalk and outputs										*/
+/*		5. Generate engagement_flags table											*/
 /*		98. Generate study metrics report											*/
 /*		99. Generate QC report														*/
 /*																					*/
+/*		X. [Archived] Generate Research Networks Table								*/
 /*		X. Scratch																	*/
 /*		X. Manage archiving of MySQL tables											*/
 /*																					*/
@@ -35,8 +37,8 @@ clear all
 * Today's date *;
 local xt: display %td_CCYY_NN_DD date(c(current_date), "DMY")
 local today = subinstr(trim("`xt'"), " " , "-", .)
-/*global today "`today'" */
-global today "2024-12-11" 
+global today "`today'" 
+/*global today "2025-01-24"  */
 
 /* ----- 2. Filepaths ----- */
 
@@ -66,8 +68,8 @@ do "$prog/HEAL_valuelabels"
 /* ----- 1. Import latest MySQL data ----- */
 do "$prog/HEAL_01_ImportMerge.do"
 
-/* ----- 2. Generate Research Networks Table ----- */
-do "$prog/HEAL_02_ResNetTable.do"
+/* ----- 2. Generate Research Network Documentation Tables ----- */
+do "$prog/HEAL_02_ResNetDocTables.do"
 
 /* ----- 3. Generate Study Table ----- */
 do "$prog/HEAL_03_StudyTable.do"
@@ -83,6 +85,12 @@ do "$prog/HEAL_98_StudyMetrics.do"
 
 /* ----- 99. Generate QC report ----- */
 do "$prog/HEAL_99_QC.do"
+
+
+
+/* ----- ARCHIVED PROGRAMS -----*/
+/* ----- Generate Research Networks Table ----- */
+do "$prog/xHEAL_02_ResNetTable.do"
 
 
 
