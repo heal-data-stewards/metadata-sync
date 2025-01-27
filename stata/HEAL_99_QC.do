@@ -4,19 +4,15 @@
 /* Program: HEAL_99_QC																*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/05/07															*/
-/* Date Last Updated: 2024/09/24													*/
-/* Description:	This program creates a QC report for data contained in MySQL. This	*/
-/*		data may have originated from NIH sources (tables: reporter, awards), or	*/
-/*		Platform sources (table: progress_tracker, which contains MDS data).		*/					
-/*		1. progress_tracker table (Platform MDS data)								*/
-/*		2. Compare appl_ids in MySQL tables 										*/
-/*		3.  																*/
+/* Date Last Updated: 2025/01/27													*/
+/* Description:	This program creates a QC report for data contained in MySQL. 		*/				
+/*		1. progress_tracker table 													*/
+/*		2. awards table																*/
+/*		3. Compare appl_ids in MySQL tables 										*/
+/*		4. Metrics by Study  														*/
 /*																					*/
 /* Notes:  																			*/
 /*		- */
-/*																					*/
-/* Version changes																	*/
-/*		- */	
 /*																					*/
 /* -------------------------------------------------------------------------------- */
 
@@ -73,15 +69,15 @@ asdoc tab project_num_badformat , title(1C. Number of records with bad format fo
 	/* Note: Can repeat reporting on appl_id and proj_num in awards and reporter tables, too */
 
 
-
+/*
 /* ----- 2. awards table  ----- */
 asdoc, text(--------------2. awards table--------------) fs(14), save($qc/QCReport_$today.doc) append
 
 use "$raw/awards_$today.dta", clear
 keep appl_id heal_funded
-keep if heal_funded=="" 
+/* keep if heal_funded=="" */ /* 12/12/2024 Note: this command isn't working because of issues exporting the awards table out of MySQL. During export, null values for TINYINT type columns are overwritten to 0. The null values are preserved inside MySQL as they should be */
 asdoc list *, title(2A. appl_ids with unknown HEAL funding) save($qc/QCReport_$today.doc) append label 
-
+*/
 
 
 
@@ -105,9 +101,10 @@ if merge_reporter_awards!=3 {
 use "$der/mysql_$today.dta", clear 
 asdoc tab merge_awards_mds, title(3C. Compare: MySQL [reporter & awards] and MDS) save($qc/QCReport_$today.doc) append label
 keep if merge_awards_mds==2
+drop if mds_ctn_number!=""
 keep appl_id hdp_id mds_ctn_number merge_awards_mds
 sort appl_id
-asdoc list *, title(3D. List of appl_ids in MDS only, but not in NIH-source MySQL tables) save($qc/QCReport_$today.doc) append label
+asdoc list *, title(3D. List of appl_ids in MDS only, but not in NIH-source MySQL tables, excluding CTN protocol HDP IDs) save($qc/QCReport_$today.doc) append label
 
 
 
@@ -115,7 +112,7 @@ asdoc list *, title(3D. List of appl_ids in MDS only, but not in NIH-source MySQ
 /* ----- 4. Metrics by Study ----- */
 asdoc, text(--------------4. Metrics by Study--------------) fs(14), save($qc/QCReport_$today.doc) append
 * -- # of studies --*;
-asdoc, text(--------------4A. Number of studies--------------) fs(12), save($qc/QCReport_$today.doc) append 
+asdoc, text(--------------4A. Number of studies, by Stewards xstudy_id--------------) fs(12), save($qc/QCReport_$today.doc) append 
 use "$der/study_lookup_table.dta", clear
 keep xstudy_id
 destring xstudy_id, replace
@@ -137,19 +134,3 @@ label define yn 0 "No" 1 "Yes"
 asdoc, text(--------------HDP_ID missingness, by study--------------) fs(12), save($qc/QCReport_$today.doc) append
 asdoc tab study_has_hdp, title(4B. Number of studies with/out a HDP ID) save($qc/QCReport_$today.doc) append label
 
-
-
-
-
-
-
-
-
-
-
-/*	* Export merge_awards_mds==2 *;
-	use "$temp/dataset_$today.dta", clear
-	keep if merge_awards_mds==2 /*n=24*/
-	save "$qc/applid_onlyin_MDS_$today.dta", replace
-	export delimited using "$qc/applid_onlyin_MDS_$today.csv", quote replace
-*/
