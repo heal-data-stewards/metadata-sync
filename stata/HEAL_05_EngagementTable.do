@@ -1,20 +1,18 @@
 /* -------------------------------------------------------------------------------- */
 /* Project: HEAL 																	*/
-/* PI: Kira Bradford, Becky Boyles													*/
+/* PI: Kira Bradford													*/
 /* Program: HEAL_05_EngagementTable													*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/12/03															*/
-/* Date Last Updated: 2024/12/03													*/
+/* Date Last Updated: 2025/01/27													*/
 /* Description:	This program creates the engagement_flags table, which contains 	*/
 /*	 several indicators that are new for PM use as of the FY24 new awards batch.	*/
 /*		1. Temporarily use local copy of awards_fy24 to get nih_foa_heal_lang 		*/
 /*		2. Create flags																*/
 /*		3. Generate Engagement Table 												*/
-/*		4. 									*/
-/*		5. 														*/
 /*																					*/
 /* Notes:  																			*/
-/*		- 			*/
+/*		- This table was added during the FY24 awards cycle.						*/
 /*																					*/
 /* -------------------------------------------------------------------------------- */
 
@@ -65,7 +63,7 @@ save "$temp/pm_flags.dta", replace
 use "$der/study_lookup_table.dta", clear
 sort appl_id
 merge m:1 appl_id using "$temp/pm_flags.dta"
-drop if _merge==2
+keep if _merge==3
 drop _merge
 
 * Apply flags to all appl_ids for the study *;
@@ -82,4 +80,4 @@ keep appl_id do_not_engage checklist_exempt_all
 duplicates drop
 sort appl_id
 save "$der/engagement_flags.dta", replace
-export delimited using "$der/engagement_flags.csv", nolab quote replace /*n=1737 ; note this n is smaller than reporter or awards tables because not every appl_id belongs to a study entity */
+export delimited using "$der/engagement_flags.csv", nolab quote replace /*n=1808 ; note this n is smaller than reporter or awards tables because not every appl_id belongs to a study entity */
