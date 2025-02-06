@@ -31,15 +31,13 @@ def transform_data(meta_dict):
     df = clean_data(df)
     return df
 
-## Function to parse the gen3_discovert
-def parse_mds_response(response_json, write_to_disk=False):
+bool_string = lambda x: 'Yes' if x else 'No'
 
-    bool_string = lambda x: 'Yes' if x else 'No'
-
+#### Function to parse the MDS data, and separate out into 4 datasets:
+def pull_mds_data(response_json, write_to_disk):
     ####################################################################################
     ### Gather metadata into useful form
     ####################################################################################
-    print(f">>> Gather metadata into useful form")
     cedar_fields = ["data",
                     "study_type",
                     "minimal_info",
@@ -51,7 +49,7 @@ def parse_mds_response(response_json, write_to_disk=False):
                     "human_treatment_applicability",
                     "time_of_registration",
                     "time_of_last_cedar_updated"]
-
+    
     guids = response_json.keys()
 
     metadata = {'nih_metadata': {}, 'ctgov_metadata': {}, 'gen3_metadata': {}, 'vlmd_metadata': {}}
@@ -61,9 +59,9 @@ def parse_mds_response(response_json, write_to_disk=False):
     study_cnt = []
 
     for guid in guids:
-
         is_gen3_discovery_datatype = False
         is_repository_study_link = False
+        is_data_type = False
         is_manifest = False
         if 'gen3_discovery' in response_json[guid].keys():
             metadata['gen3_metadata'][guid] = response_json[guid]['gen3_discovery'] # get majority metadata
@@ -84,14 +82,24 @@ def parse_mds_response(response_json, write_to_disk=False):
                         else:
                             metadata['gen3_metadata'][guid][f'study_metadata.{key1}.{key2}'] = response_json[guid]['gen3_discovery']['study_metadata'][key1][key2]
                 repository_study_link = ''
+                repository_name = ''
                 if 'metadata_location' in response_json[guid]['gen3_discovery']['study_metadata'] and \
                     'data_repositories' in response_json[guid]['gen3_discovery']['study_metadata']['metadata_location'] and \
                         len(response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories']) > 0:
                     print(f"**** Data repositories present for guid {guid}")
-                    is_repository_study_link = len(response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories'][0].get('repository_study_link','')) > 0
+                    repository_info = [ (k['repository_study_link'], k['repository_name'] if 'repository_name' in k else '') for k in response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories'] if ('repository_study_link' in k and len(k['repository_study_link'])>0)]
+                    is_repository_study_link = len(repository_info) > 0
+                    print(f"---- Number of repository links: {len(repository_info)}, {is_repository_study_link}\n{repository_info}")                    
                     if is_repository_study_link:
-                        repository_study_link = response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories'][0].get('repository_study_link', '')
+                        repository_study_link = repository_info[0][0]
+                        repository_name = repository_info[0][1] #response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories'][0].get('repository_study_link', '')
                         print(f"REpository study link for {guid} is {repository_study_link}")
+                data_type = ''
+                if 'data' in response_json[guid]['gen3_discovery']['study_metadata'] and \
+                    'data_type' in response_json[guid]['gen3_discovery']['study_metadata']['data']:
+                    is_data_type = len(response_json[guid]['gen3_discovery']['study_metadata']['data']['data_type']) > 0
+                    if is_data_type:
+                        data_type = '; '.join(response_json[guid]['gen3_discovery']['study_metadata']['data']['data_type'])
                 del metadata['gen3_metadata'][guid]['study_metadata']
             
             gen3_data_availability = response_json[guid]['gen3_discovery']['data_availability'] if 'data_availability' in response_json[guid]['gen3_discovery'].keys() else ''
@@ -106,7 +114,10 @@ def parse_mds_response(response_json, write_to_disk=False):
                 study_cnt.append( {'guid':guid, 
                                 'guid_type': response_json[guid]['_guid_type'] if is_gen3_discovery_datatype else '', 
                                  'manifest': response_json[guid]['gen3_discovery']['__manifest'] if  is_manifest else '', 
-                                 'repository_study_link': repository_study_link if is_repository_study_link else '' })
+                                 'repository_study_link': repository_study_link if is_repository_study_link else '' ,
+                                 'repository_name': repository_name if is_repository_study_link else '',
+                                 'repository_data_type':  data_type if is_data_type else '',
+                })
 
             ## Set vlmd_metadata to a deafult set.
             metadata['vlmd_metadata'][guid]={'vlmd_available':False, 'data_dictionaries':[], 'common_data_element':{}}
@@ -138,24 +149,27 @@ def parse_mds_response(response_json, write_to_disk=False):
         pd.DataFrame.from_records(study_cnt, index='guid').to_excel('/tmp/studies_for_cnt.xlsx') 
 
     df1 = transform_data(metadata['gen3_metadata'])
+    
     df2 = transform_data(metadata['ctgov_metadata'])
+
     df3 = transform_data(metadata['nih_metadata'])
+
     df4 = transform_data(metadata['vlmd_metadata'])
 
     df_apid = df3['appl_id']
     df1.drop(['appl_id'], axis=1, errors='ignore')
     df1 = pd.concat([df1, df_apid], axis=1)
 
-    ####################################################################################
-    ### Pull out relevant metadata
-    ####################################################################################
-    print(">>> Pull out relevant metadata")
+    return df1, df2, df3, df4
+
+def prep_gen3_metadata(df_gen3_metaadata):
+
+    print(">>> >>> Preparing GEN3 metadata")
     def replace_single_quote(input_list):
         modified_list = [name.replace("'", "`") for name in input_list]
         return str("[{}]".format(", ".join("'{}'".format(name) for name in modified_list)))
 
-
-    def mydf1function(rowdf):
+    def process_df(rowdf):
         projname = rowdf.iloc[0]['project_title']
         projnumber = rowdf.iloc[0]['project_number']
         projPI = rowdf.iloc[0]['investigators_name']
@@ -204,7 +218,6 @@ def parse_mds_response(response_json, write_to_disk=False):
         gen3_data_availability = rowdf.iloc[0]['gen3_data_availability']
 
         return {
-            ### TODO contact pi name
             'guid_type': guid_type,
             'study_name': str(projname).replace("'", "''"),
             'project_num': projnumber,
@@ -230,9 +243,20 @@ def parse_mds_response(response_json, write_to_disk=False):
             'is_producing_data': bool_string(study_producing_data),
             'is_producing_data_not_sharing': bool_string((study_producing_data and gen3_data_availability=='not_available'))
         }
+    
+    df1_null = df_gen3_metaadata.replace(np.nan, '')
+    res_series = df1_null.groupby('guids').apply(process_df)
+    res_df = pd.DataFrame(res_series.tolist(), index=res_series.index)
 
+    print(">>> >>> DONE")
+    return res_df
+
+def prep_nih_metadata(df_nih_metadata):
+    
+    print(">>> >>> Preparing NIH metadata")
+    
     # Grab necessary metadata from NIH Metadata
-    def mydf3function(rowdf):
+    def process_df(rowdf):
         appl_id = rowdf.iloc[0]['appl_id']
         award_type = rowdf.iloc[0]['award_type']
         award_amount = rowdf.iloc[0]['award_amount']
@@ -250,7 +274,17 @@ def parse_mds_response(response_json, write_to_disk=False):
             'project_title':project_title
         }
 
-    def mydf4function(rowdf):
+    res_series = df_nih_metadata.groupby('guids').apply(process_df)
+    res_df = pd.DataFrame(res_series.tolist(), index=res_series.index)
+    
+    print(">>> >>> DONE")
+    return res_df
+    
+def prep_vlmd_metadata(df_vlmd_metadata):
+
+    print(">>> >>> Preparing VLMD metadata")
+    
+    def process_df(rowdf):
         vlmd_available = bool_string(rowdf.iloc[0]['vlmd_available'])
         num_datadicts = len(rowdf.iloc[0]['data_dictionaries']) if (not pd.isna(rowdf.iloc[0]['data_dictionaries']) and vlmd_available == 'Yes') else 0
         num_cdes = len(rowdf.iloc[0]['common_data_elements']) if (not pd.isna(rowdf.iloc[0]['common_data_elements']) and vlmd_available == 'Yes') else 0
@@ -262,18 +296,19 @@ def parse_mds_response(response_json, write_to_disk=False):
             'heal_cde_used': heal_cde_used
         }
 
-    df1_null = df1.replace(np.nan, '')
-    res_series1 = df1_null.groupby('guids').apply(mydf1function)
-    res_df1 = pd.DataFrame(res_series1.tolist(), index=res_series1.index)
-    res_series3 = df3.groupby('guids').apply(mydf3function)
-    res_df3 = pd.DataFrame(res_series3.tolist(), index=res_series3.index)
-    res_series4 = df4.groupby('guids').apply(mydf4function)
-    res_df4 = pd.DataFrame(res_series4.tolist(), index=res_series4.index)
+    res_series = df_vlmd_metadata.groupby('guids').apply(process_df)
+    res_df = pd.DataFrame(res_series.tolist(), index=res_series.index)
 
+    print(">>> >>> DONE")
+
+    return res_df
+
+def get_cedar_completion_stats(df_gen3_metadata):
+    
     ####################################################################################
     ### CEDAR Completion
     ####################################################################################
-    print(">>> CEDAR Completion")
+    print(">>> >>> Getting CEDAR Completion")
     # create a list to store all the gathered data
     cedar_comp_info = []
 
@@ -294,9 +329,9 @@ def parse_mds_response(response_json, write_to_disk=False):
     now = datetime.now()
     time_now = now.strftime('%Y-%m-%d %H:%M:%S')
     print(f"* * * time_now: {time_now}")
-    for index, row in df1.iterrows():
-        if 'time_of_last_cedar_updated' in df1:
-            cedar_update = df1.loc[0, 'time_of_last_cedar_updated']
+    for index, row in df_gen3_metadata.iterrows():
+        if 'time_of_last_cedar_updated' in df_gen3_metadata:
+            cedar_update = df_gen3_metadata.loc[0, 'time_of_last_cedar_updated']
         else:
             cedar_update = ''
 
@@ -482,15 +517,36 @@ def parse_mds_response(response_json, write_to_disk=False):
     ]
     complxn_stats = pd.DataFrame(cedar_comp_info, columns=col_names)
 
+    print(">>> >>> DONE")
+    return complxn_stats
+
+## Function to parse the gen3_discovert
+def parse_mds_response(response_json, write_to_disk=False):
+
+    print(">>> Pull out relevant metadata")
+    df_gen3_metadata, df_ctgov_metadata, df_nih_metadata, df_vlmd_metadata = pull_mds_data(response_json, write_to_disk)
+    print("--- Finished")
+
+    ####################################################################################
+    ### Pull out relevant metadata
+    ####################################################################################
+    print(">>> Prepare metadata for export")
+    pulled_gen3_data = prep_gen3_metadata(df_gen3_metadata)
+    pulled_nih_data = prep_nih_metadata(df_nih_metadata)
+    pulled_vlmd_data = prep_vlmd_metadata(df_vlmd_metadata)
+    cedar_completion_data = get_cedar_completion_stats(df_gen3_metadata)
+    print("--- Finished")
+
     ####################################################################################
     ### Combining all dataframes
     ####################################################################################
-    print(">>> Combining all dataframes")
-    merged_df = pd.merge(res_df1, res_df3, how='outer', on='guids')
-    merged_df = pd.merge(merged_df, res_df4, how='outer', on='guids')
-    merged_df = pd.merge(merged_df, complxn_stats, how='outer', on='guids')
+    print(">>> Combining all datasets")
+    merged_df = pd.merge(pulled_gen3_data, pulled_nih_data, how='outer', on='guids')
+    merged_df = pd.merge(merged_df, pulled_vlmd_data, how='outer', on='guids')
+    merged_df = pd.merge(merged_df, cedar_completion_data, how='outer', on='guids')
     merged_df = merged_df.rename(columns={'guids': 'hdp_id'})
     final_df = merged_df.T.transpose()
+    print("--- Finished")
 
     ####################################################################################
     #### Adding more derived fields
@@ -500,7 +556,7 @@ def parse_mds_response(response_json, write_to_disk=False):
     ####################################################################################
     ### Prepare data for 
     ####################################################################################
-    print(">>> Preparing combined data")
+    print(">>> Preparing combined data for export")
     tmp_df = final_df
     tmp_df.fillna(0, inplace=True)
 
@@ -512,17 +568,20 @@ def parse_mds_response(response_json, write_to_disk=False):
 
     if write_to_disk:
         insert_df.to_csv('/tmp/output.csv')
+    print("--- Finished")
     return insert_df
 
-def mds_data_prep(local=False):
-    ####################################################################################
-    ### Find MDS record for the study searching by project number, appl_id, or hdpid
-    ####################################################################################
-    print(">>> Find MDS record for the study searching by project number, appl_id, or hdpid")
+def get_mds_response():
+    print(">>> Query MDS for all data")
     query = 'https://healdata.org/mds/metadata?data=True&limit=1000000'
     print(f'Query: {query}')
 
     response = requests.get(f"{query}")
     response_json = response.json()
+    print("--- Finished")
+    return response_json
+
+def mds_data_prep(local=False):
+    response_json = get_mds_response()
     mds_data = parse_mds_response(response_json, write_to_disk=local)
     return mds_data
