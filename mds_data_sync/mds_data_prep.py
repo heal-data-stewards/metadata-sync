@@ -207,7 +207,7 @@ def prep_gen3_metadata(df_gen3_metaadata):
             archivedate = ''
         
         regstatus_b = rowdf.iloc[0]['is_registered'] and (guid_type == 'discovery_metadata')
-        regstatus = bool_string(regstatus_b)
+        regstatus = "registered" if regstatus_b else "not registered"
         if regstatus_b:
             regdate = rowdf.iloc[0]['time_of_registration']
             reguser = rowdf.iloc[0]['registrant_username']
