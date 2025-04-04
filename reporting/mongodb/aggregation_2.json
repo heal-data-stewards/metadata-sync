@@ -1,0 +1,18 @@
+/*
+* query: find all studies with at least repository_study_link
+*/
+[
+    {
+      $match: {
+        "gen3_discovery.study_metadata.metadata_location.data_repositories":
+          {
+            $elemMatch: {
+              repository_study_link: {
+                $exists: true,
+                $ne: ""
+              }
+            }
+          }
+      }
+    }
+  ]

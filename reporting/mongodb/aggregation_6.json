@@ -1,0 +1,82 @@
+/*
+* query: POC_report
+*/
+
+[
+    {
+      $match:
+        /**
+         * query: The query in MQL.
+         */
+        {
+          _guid_type: {
+            $in: [
+              "discovery_metadata",
+              "unregistered_discovery_metadata"
+            ]
+          }
+        }
+    },
+    {
+      $facet:
+        /**
+         * outputFieldN: The first output field.
+         * stageN: The first aggregation stage.
+         */
+        {
+          study_type: [
+            {
+              $group: {
+                _id: "$_guid_type",
+                count: {
+                  $sum: 1
+                }
+              }
+            }
+          ],
+          count: [
+            {
+              $group: {
+                _id: null,
+                count: {
+                  $sum: 1
+                }
+              }
+            }
+          ],
+          count2: [
+            {
+              $count: "heal"
+            }
+          ],
+          vlmd: [
+            {
+              $match: {
+                "variable_level_metadata.data_dictionaries":
+                  {
+                    $exists: true,
+                    $ne: null
+                  }
+              }
+            },
+            {
+              $count: "count"
+            }
+          ],
+          cde: [
+            {
+              $match: {
+                "variable_level_metadata.common_data_elements":
+                  {
+                    $exists: true,
+                    $ne: null
+                  }
+              }
+            },
+            {
+              $count: "count"
+            }
+          ]
+        }
+    }
+  ]

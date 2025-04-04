@@ -1,0 +1,26 @@
+/*
+* query: select * from progress_tracker where clinical_trials_study_id not null;
+*/
+[
+        // {
+    //   $match:
+    //     /**
+    //      * query: The query in MQL.
+    //      */
+    //     {
+    //       "gen3_discovery.study_metadata.metadata_location.clinical_trials_study_ID":
+    //         {
+    //           $exists: true
+    //         }
+    //     }
+    // },
+    {
+      $match:
+        {
+          "clinicaltrials_gov.protocolSection.identificationModule.nctId":
+            {
+              $exists: true
+            }
+        }
+    }
+  ]

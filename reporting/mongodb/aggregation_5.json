@@ -1,0 +1,75 @@
+/*
+* query: find the 23 studies in our last 6 month report that per the Platform MDS are producing but not sharing data - v0
+*/
+[
+    // {
+    //   $group: {
+    //     _id: null,
+    // set: {$addToSet: "$gen3_discovery.study_metadata.data_availability.data_available"}
+    // set: {$addToSet: "$gen3_discovery.study_metadata.data_availability.data_collection_status"
+    //     set: {
+    //       $addToSet:
+    //         "$gen3_discovery.study_metadata.data_availability.data_restricted"
+    //     }
+    //   }
+    // }
+    // {
+    //   $match: {
+    //     _guid_type: {
+    //       $in: [
+    //         "discovery_metadata",
+    //         "unregistered_discovery_metadata"
+    //       ]
+    //     },
+    //     "gen3_discovery.study_metadata.data_availability.produce_data":
+    //       "Yes",
+    //     "gen3_discovery.study_metadata.data_availability.data_available":
+    //       "none"
+    // "$gen3_discovery.study_metadata.data_availability.data_restricted": ""
+    //
+    // produce_data
+    // "Yes"
+    // produce_other
+    // "No"
+    // data_available
+    // "some"
+    // data_restricted
+    // 0
+    // "all"
+    // 1
+    // ""
+    // 2
+    // "some"
+    // 3
+    // "none"
+    //   }
+    // },
+    {
+      $group: {
+        _id: null,
+        set: {
+          $addToSet:
+            "$gen3_discovery.study_metadata.data_availability.data_available"
+        }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        set: {
+          $addToSet: "$gen3_discovery._hdp_uid"
+        }
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        set: {
+          $sortArray: {
+            input: "$set",
+            sortBy: 1
+          }
+        } // Sort in ascending order
+      }
+    }
+  ]

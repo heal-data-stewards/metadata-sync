@@ -1,0 +1,13 @@
+/*
+* query: find all studies that end before 2024
+*/
+[
+    {
+      $match:
+        {
+          "nih_reporter.project_end_date": {
+            $lt: "2024-01-01"
+          }
+        }
+    }
+  ]
