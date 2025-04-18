@@ -1,0 +1,4 @@
+deepdiff
+pymongo
+python-dotenv
+requests
