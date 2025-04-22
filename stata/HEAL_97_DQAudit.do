@@ -4,13 +4,16 @@
 /* Program: HEAL_97_DQAudit															*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2025/03/27															*/
-/* Date Last Updated: 2025/04/16													*/
+/* Date Last Updated: 2025/04/22													*/
 /* Description:	This program performs a data quality audit checking the completeness*/	
 /*	of data about NIH awards related to HEAL studies in the MySQL database.			*/			
-/*		1.  													*/
-/*		2. 																*/
-/*		3.  										*/
-/*		4.   														*/
+/*		1. Create key of appl_ids in MySQL  										*/
+/*		2. Query NIH Reporter for all awards sharing a project serial number with 	*/
+/*			an award in MySQL 														*/
+/*		3. Merge key with NIH Reporter query output									*/
+/*		4. Isolate awards we should track that aren't yet in MySQL   				*/
+/*		5. Rename vars to same names used in reporter table							*/
+/*		6. Format and output table for MySQL										*/
 /*																					*/
 /* Notes:  																			*/
 /*		- See https://docs.google.com/document/d/									*/
@@ -77,7 +80,7 @@ drop _merge
 	destring fiscal_year, replace
 	gen award_year=year(award_notice_date_date)
 		order award_year, after(award_notice_date_date)
-
+		replace award_year=fiscal_year if award_year==. /*n=39 changes made*/
 
 
 /* ----- 4. Isolate awards we should track that aren't yet in MySQL ----- */
