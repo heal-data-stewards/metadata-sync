@@ -4,7 +4,7 @@
 /* Program: HEAL_98_StudyMetrics													*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/06/23															*/
-/* Date Last Updated: 2024/12/13													*/
+/* Date Last Updated: 2025/04/25													*/
 /* Description:	This program produces a report of HDE study metrics.				*/
 /*		1. Number of NIH awards in MySQL											*/
 /*		2. Number of studies with VLMD on Platform									*/
@@ -15,7 +15,7 @@
 /*		7. Number of studies submitted SLMD											*/
 /*		8. Number of studies selected repo											*/
 /*		9. Number of studies with data linked on Platform							*/
-/*											*/
+/*		10. Other: MySQL entities and awards										*/
 /*												*/
 /*																					*/
 /* Notes:  																			*/
@@ -26,6 +26,9 @@
 /*		  previous program HEAL_6Mo_Report.do; the latter has been archived.		*/
 /*																					*/
 /* Version changes																	*/
+/*		- 2025/04/25 - Met w/ Kathy and Hina and removed conditional exclusion of	*/
+/*		  drop if gen3_data_availability=="not_available" from registration and		*/
+/*		  SLMD completion metrics.													*/
 /*		- 2024/12/13 - Code updated after changing MySQL's progress_tracker table	*/
 /*		  to include more fields and getting specification from the Platform on how */
 /*		  they calculate metrics. See "Study Tracking in Platform and MySQL_Running */
@@ -157,7 +160,6 @@ asdoc, text(--------------6. Number of studies registered--------------) fs(14),
 asdoc, text(HDE Metric=% of studies producing data which have completed Platform registration.) save($qc/StudyMetrics_$today.doc) append label
 
 use "$temp/metrics_$today.dta", clear
-drop if gen3_data_availability=="not_available" /* drop studies producing but not sharing data */
 label var is_registered "Registered on Platform"
 asdoc tab is_registered, miss save($qc/StudyMetrics_$today.doc) append label
 
@@ -166,11 +168,10 @@ asdoc tab is_registered, miss save($qc/StudyMetrics_$today.doc) append label
 
 /* ----- 7. Number of studies submitted SLMD ----- */
 asdoc, text(--------------7. Number of studies submitted SLMD--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
-asdoc, text(HDE Metric=% of studies producing and sharing data which have completed SLMD submission. Estimated using overall_percent_complete, which is a field created in the progress_tracker table by the code that moves MDS data into MySQL. SLMD is considered submitted if the CEDAR form completion rate is >=50%.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(HDE Metric=% of studies producing data which have completed SLMD submission. Estimated using overall_percent_complete, which is a field created in the progress_tracker table by the code that moves MDS data into MySQL. SLMD is considered submitted if the CEDAR form completion rate is >=50%.) save($qc/StudyMetrics_$today.doc) append label
 
 
 use "$temp/metrics_$today.dta", clear
-drop if gen3_data_availability=="not_available" /* drop studies producing but not sharing data */
 destring overall_percent_complete, replace
 gen slmd=0
 replace slmd=1 if overall_percent_complete>=50 & overall_percent_complete!=.
@@ -209,9 +210,47 @@ asdoc tab data_linked_on_platform, miss save($qc/StudyMetrics_$today.doc) append
 
 
 
+/* ----- 10. Other: MySQL entities and awards ----- */
+asdoc, text(--------------10. Other: MySQL entities and awards--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
+
+* Number of CTN protocols *;
+use "$der/mysql_$today.dta", clear
+keep if mds_ctn_flag==1
+gen ctns=_n
+label var ctns "Number of CTN Protocols"
+asdoc sum ctns, statistics(max) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(The number of CTN Protocols is determined by how many HDP IDs on Platform are records for a CTN Protocol.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
+
+* Number of MySQL studies *;
+use "$der/study_lookup_table.dta", clear
+destring xstudy_id, replace
+label var xstudy_id "Number of MySQL studies"
+asdoc sum xstudy_id, statistics(max) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(The number of distinct studies tracked in the MySQL DB, where 'study' is defined by the HEAL Stewards. The number reported above is a count of unique values of xstudy_id.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
+
+* Number of awards in MySQL *;
+use "$der/mysql_$today.dta", clear
+drop if merge_awards_mds==2
+keep appl_id
+sort appl_id
+drop if appl_id==""
+duplicates drop
+gen appls=_n
+label var appls "Number of MySQL awards"
+asdoc sum appls, statistics(max) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(The number of awards tracked in the MySQL DB, where an award is defined as a unique NIH appl_id.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
 
 
-
-
-
-
+* Awards in MySQL by entity type *;
+use "$der/mysql_$today.dta", clear
+drop if merge_awards_mds==2
+keep appl_id entity_type
+sort appl_id
+duplicates drop
+merge 1:1 appl_id using "$der/research_networks.dta"
+replace entity_type="CTN Protocol" if res_net=="CTN"
+asdoc tab entity_type, title(appl_ids by entity type) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(This tabulation shows the number of awards belonging to each type of entity. Here, the number for CTN Protocol indicates the total number of appl_ids associated with the 40 CTN Protocol numbers. The 'Other' entity type indicates 6 awards that do not have project serial numbers and appear to be contracts or other agreements - these 6 are listed out in the regular QC Report. Every other appl_id in the MySQL DB belongs to a Study, where 'study' is defined by the Stewards.) save($qc/StudyMetrics_$today.doc) append label

@@ -4,7 +4,7 @@
 /* Program: HEAL_97_DQAudit															*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2025/03/27															*/
-/* Date Last Updated: 2025/04/22													*/
+/* Date Last Updated: 2025/04/25													*/
 /* Description:	This program performs a data quality audit checking the completeness*/	
 /*	of data about NIH awards related to HEAL studies in the MySQL database.			*/			
 /*		1. Create key of appl_ids in MySQL  										*/
@@ -14,6 +14,7 @@
 /*		4. Isolate awards we should track that aren't yet in MySQL   				*/
 /*		5. Rename vars to same names used in reporter table							*/
 /*		6. Format and output table for MySQL										*/
+/*		7. Debug: split up large file into 2 for MySQL import						*/
 /*																					*/
 /* Notes:  																			*/
 /*		- See https://docs.google.com/document/d/									*/
@@ -86,7 +87,7 @@ drop _merge
 /* ----- 4. Isolate awards we should track that aren't yet in MySQL ----- */
 		
 * Exclude awards issued before the HEAL Initiative started giving awards *;
-drop if award_year<2018 & award_year!=. /*n=877 deleted*/
+drop if award_year<2018 /*n=877 deleted*/
 
 * Apply study ID creation rules *;
 sort project_serial_num project_num_splitsuffix_code subproject_id
@@ -96,7 +97,7 @@ order xstudy_id appl_id in_mysql award_year project_serial_num project_num_split
 * Drop if awards associated with the study ID are *always* or *never* in MySQL *;
 bysort xstudy_id: egen ever_in_mysql=max(in_mysql)
 bysort xstudy_id: egen all_in_mysql=min(in_mysql)
-drop if ever_in_mysql==0 /*No appl"s associated with the study were in MySQL. n=981 deleted*/
+drop if ever_in_mysql==0 /*No appl"s associated with the study were in MySQL. n=974 deleted*/
 drop if all_in_mysql==1 /*Every possible appl already in MySQL. n=1328 deleted*/
 drop ever_in_mysql all_in_mysql
 
@@ -108,7 +109,7 @@ by xstudy_id: egen earliest_award_inmysql=min(xearliest_award_inmysql)
 drop if in_mysql==0 & award_year<earliest_award_inmysql /*n=159*/
 drop xearliest_award_inmysql earliest_award_inmysql
 
-	tab in_mysql /* 681 appls in MySQL ;  453 not in MySQL */
+	tab in_mysql /* 681 appls in MySQL ;  450 not in MySQL */
 	tab in_mysql in_resnet, miss
 
 rename xstudy_id study
@@ -174,9 +175,29 @@ order proj_num_spl_sfx_code, after(proj_ser_nm_spl)
 order subproj_id, after(spd_cat_0)
 
 save "$der/reporter_dqaudit.dta", replace
-export delimited using "$der/reporter_dqaudit.csv", nolab quote replace
+
+
+drop bgt_end_date award_notice_date_date project_end_date_date budget_year_end budget_year_start date_added project_end_year
+export delimited using "$der/reporter_dqaudit.csv", nolab /*quote */replace
 export excel using "$der/reporter_dqaudit.xlsx", firstrow(var) nolabel replace
 
 
 
 
+
+/* ----- 7. Debug: split up large file into 2 for MySQL import ----- */
+use "$der/reporter_dqaudit.dta", clear
+drop bgt_end_date award_notice_date_date project_end_date_date budget_year_end budget_year_start date_added project_end_year
+gen row=_n
+save "$temp/splits.dta", replace
+
+keep if row<=225
+drop row
+save "$der/reporter_dqaudit_pt1.dta", replace
+export delimited using "$der/reporter_dqaudit_pt1.csv", nolab quote replace
+
+use "$temp/splits.dta", clear
+keep if row>225
+drop row
+save "$der/reporter_dqaudit_pt2.dta", replace
+export delimited using "$der/reporter_dqaudit_pt2.csv", nolab quote replace

@@ -4,7 +4,7 @@
 /* Program: HEAL_00_Master															*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/02/29															*/
-/* Date Last Updated: 2025/01/24													*/
+/* Date Last Updated: 2025/04/25													*/
 /* Description:	This is the master Stata program for MySQL data processing. It sets	*/
 /* global macros before calling the following programs:								*/
 /*		1. Import & merge data														*/
@@ -12,6 +12,7 @@
 /*		3. Generate Study Table														*/
 /*		4. Generate CTN crosswalk and outputs										*/
 /*		5. Generate engagement_flags table											*/
+/*		97. Perform data quality audit on Reporter									*/
 /*		98. Generate study metrics report											*/
 /*		99. Generate QC report														*/
 /*																					*/
@@ -38,7 +39,7 @@ clear all
 local xt: display %td_CCYY_NN_DD date(c(current_date), "DMY")
 local today = subinstr(trim("`xt'"), " " , "-", .)
 global today "`today'" 
-/*global today "2025-01-24"  */
+/*global today "2025-04-08" */
 
 /* ----- 2. Filepaths ----- */
 
@@ -79,6 +80,9 @@ do "$prog/HEAL_04_CTN.do"
 
 /* ----- 5. Generate Engagement table ----- */
 do "$prog/HEAL_05_EngagementTable.do"
+
+/* ----- 97. Perform data quality audit on Reporter ----- */
+do "$prog/HEAL_97_DQAudit.do"
 
 /* ----- 98. Generate study metrics report ----- */
 do "$prog/HEAL_98_StudyMetrics.do"
