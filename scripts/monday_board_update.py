@@ -197,7 +197,7 @@ def import_mysql_data(input_dir:Path, gt_file:pd.DataFrame, monday_board:pd.Data
     resnet_df = pd.read_csv(input_dir/"research_networks.csv", low_memory=False, dtype=convert_dict)
     logging.info(f"Research Network table has: {len(resnet_df)} entrie, with {len(get_unique_values(resnet_df))} appl_ids")
     engagement_flags_df = pd.read_csv(input_dir/"engagement_flags.csv", low_memory=False, dtype=convert_dict)
-    logging.info(f"Engagment Flags table has: {len(resnet_df)} entrie, with {len(get_unique_values(engagement_flags_df))} appl_ids")
+    logging.info(f"Engagment Flags table has: {len(engagement_flags_df)} entrie, with {len(get_unique_values(engagement_flags_df))} appl_ids")
 
     logging.info("--- Wrangling PI Emails")
     ## Manipulate emails to carry forward emails from a previous appl_id to the most recent one according to the lookup table and email table
@@ -233,12 +233,20 @@ def import_mysql_data(input_dir:Path, gt_file:pd.DataFrame, monday_board:pd.Data
 
     pi_emails_df_updated = pi_emails_df_updated_monday[['study_most_recent_appl', 'pi_email_updated']].rename(columns={'pi_email_updated':'pi_email'})
 
+    ## Update the research network table so that Most Recent Appl ID from lookup table is assigned research network from any of the appl ids. 
+    resnet_added = pd.merge(appl_ids, resnet_df[['appl_id', 'res_net']], how = 'left', left_on='appl_id', right_on='appl_id' )
+    resnet_most_recent_appl_id = resnet_added[~pd.isna(resnet_added.res_net)][['study_most_recent_appl', 'res_net']]
+    resnet_added_updated = pd.merge(appl_ids, resnet_most_recent_appl_id, how='left', left_on='study_most_recent_appl', right_on='study_most_recent_appl')
+    resnet_df = resnet_added_updated[['study_most_recent_appl', 'res_net']].drop_duplicates()
+    resnet_added_updated.to_csv("/tmp/tmp_resnet_udpated.csv", index=False)
+    resnet_df.to_csv("/tmp/tmp_resnet_df.csv", index=False)
+
     ## Collect fields from report/awards tables that are required by Monday Board
     mysql_fields_reporter = create_mysql_subset(awards_df)
     mysql_fields_awards = create_mysql_subset(reporter_df)
     mysql_fields_platform = create_mysql_subset(progress_tracker_df, extra_fields=['hdp_id'])
     mysql_fields_piemails = create_mysql_subset(pi_emails_df_updated, extra_fields=['study_most_recent_appl'])
-    mysql_fields_resnet = create_mysql_subset(resnet_df)
+    mysql_fields_resnet = create_mysql_subset(resnet_df, extra_fields=['study_most_recent_appl'])
     mysql_fields_resnet['Research Network'] = [k.upper() if not pd.isna(k) else '' for k in mysql_fields_resnet['Research Network']]
     mysql_fields_enagementflags = create_mysql_subset(engagement_flags_df)
 
@@ -251,7 +259,7 @@ def import_mysql_data(input_dir:Path, gt_file:pd.DataFrame, monday_board:pd.Data
     logging.info(f"Number of fields after adding awards table fields: {len(data_merge_2)}")
     data_merge_1 = pd.merge(data_merge_2, mysql_fields_platform, how='left', left_on='study_hdp_id', right_on='hdp_id')
     logging.info(f"Number of fields after adding Platform MDS table fields: {len(data_merge_1)}")
-    data_merge_2 = pd.merge(data_merge_1, mysql_fields_resnet, how='left', left_on='study_most_recent_appl', right_on='appl_id').drop(columns='appl_id')
+    data_merge_2 = pd.merge(data_merge_1, mysql_fields_resnet, how='left', left_on='study_most_recent_appl', right_on='study_most_recent_appl')
     logging.info(f"Number of fields after adding research network table fields: {len(data_merge_2)}")
     data_merge_1 = pd.merge(data_merge_2, mysql_fields_enagementflags, how='left', left_on='study_most_recent_appl', right_on='appl_id').drop(columns='appl_id')
     logging.info(f"Number of fields after adding engagegment flag table fields: {len(data_merge_1)}")
