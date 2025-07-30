@@ -127,10 +127,12 @@ def import_study_lookup_table(input_dir:Path):
 '''
 Import Monday HEAL Studies Board data from an excel file export from Monday 
 '''
-def import_monday_board(input_dir:Path):
-    board_files_list = list(input_dir.glob("HEAL_Studies_*.xlsx"))
-    df = pd.read_excel(board_files_list[0], skiprows=4)
-    monday_board = df[~(df.Name.isin(['Studies under investigation', 'Name', 'Studies Not Added to Platform', 'CTN Protocols']))]
+def import_monday_board(input_dir:Path, file_name="HEAL_Studies_*.xlsx", rows_to_skip = 4):
+    board_files_list = list(input_dir.glob(file_name))
+    print(board_files_list)
+    df = pd.read_excel(board_files_list[0], skiprows=rows_to_skip)
+    print(df.columns)
+    monday_board = df[~(df.Name.isin(['Studies under investigation', 'Name', 'Studies Not Added to Platform', 'CTN Protocols', 'Pending assessment results']))]
     monday_board = monday_board[~pd.isna(monday_board['Name'])]
     logging.info(f"Number of records on Monday Board: {len(monday_board)}")
     return monday_board
