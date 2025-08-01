@@ -573,13 +573,26 @@ def parse_mds_response(response_json, write_to_disk=False):
 
 def get_mds_response():
     print(">>> Query MDS for all data")
-    query = 'https://healdata.org/mds/metadata?data=True&limit=1000000'
-    print(f'Query: {query}')
-
-    response = requests.get(f"{query}")
-    response_json = response.json()
+    chunk_size = 1000
+    complete_response = {}
+    for chunk_ind in range(0,10):
+        try:
+            query = f"https://healdata.org/mds/metadata?data=True&limit={chunk_size}&offset={chunk_ind*chunk_size}"
+            print(f'Query: {query}')
+            response = requests.get(f"{query}")
+            response.raise_for_status()
+            response_json = response.json()
+            print(len(response_json))
+            if len(response_json) == 0:
+                print("No more data from MDS")
+                break
+            complete_response.update(response_json)
+        except Exception as e:
+            print(f"Error fetching the data for offset: {chunk_ind*chunk_size}, skipping this chunk")
+            continue
+    print(f"Fetched {len(complete_response)} data elements from the MDS")
     print("--- Finished")
-    return response_json
+    return complete_response
 
 def mds_data_prep(local=False):
     response_json = get_mds_response()
