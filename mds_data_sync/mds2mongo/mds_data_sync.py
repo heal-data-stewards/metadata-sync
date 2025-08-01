@@ -30,15 +30,27 @@ EXCLUDED_FIELDS = [
 ]
 
 def fetch_metadata(url):
-    """Fetch data from the endpoint."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        return list(data.values()) if isinstance(data, dict) else data
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching data from {url}: {e}")
-        return []
+    """Fetch data by chunk from the endpoint."""
+    chunk_size = 1000
+    complete_data = {}
+    for chunk_ind in range(0,10):
+        try:
+            query = f"https://healdata.org/mds/metadata?data=True&limit={chunk_size}&offset={chunk_ind*chunk_size}"
+            print(f'Query: {query}')
+            response = requests.get(f"{query}")
+            response.raise_for_status()
+            response_json = response.json()
+            print(len(response_json))
+            if len(response_json) == 0:
+                print("No more data from MDS")
+                break
+            complete_data.update(response_json)
+        except Exception as e:
+            print(f"Error fetching the data for offset: {chunk_ind*chunk_size}, skipping this chunk")
+            continue
+    print(f"Fetched {len(complete_data)} data elements from the MDS")
+    print("--- Finished")
+    return list(complete_data.values()) if isinstance(complete_data, dict) else complete_data
 
 def calculate_cedar_completion(doc):
     """Calculate the number of completed CEDAR form fields, but set completion percentage to 0% if unregistered."""
@@ -113,7 +125,7 @@ def save_to_mongodb(data, mongo_uri, db_name, collection_name):
 
 def main():
     # Define parameters
-    endpoint = "https://healdata.org/mds/metadata?data=True&limit=1000000"
+    endpoint = "https://healdata.org/mds/metadata?data=True&limit=12000"
     mongo_uri = os.getenv("MONGODB_ATLAS_SRV")
     db_name = os.getenv("MONGODB_DB_NAME")
     collection_name = os.getenv("MONGODB_SNAPSHOT_COLLECTION")
