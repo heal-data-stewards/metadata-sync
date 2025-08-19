@@ -159,7 +159,6 @@ def pull_mds_data(response_json, write_to_disk):
     df_apid = df3['appl_id']
     df1.drop(['appl_id'], axis=1, errors='ignore')
     df1 = pd.concat([df1, df_apid], axis=1)
-
     return df1, df2, df3, df4
 
 def prep_gen3_metadata(df_gen3_metaadata):
@@ -170,7 +169,7 @@ def prep_gen3_metadata(df_gen3_metaadata):
         return str("[{}]".format(", ".join("'{}'".format(name) for name in modified_list)))
 
     def process_df(rowdf):
-        projname = rowdf.iloc[0]['project_title']
+        projname = rowdf.iloc[0]['cedar_study_metadata.minimal_info.study_name']
         projnumber = rowdf.iloc[0]['project_number']
         projPI = rowdf.iloc[0]['investigators_name']
 
