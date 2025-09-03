@@ -95,11 +95,13 @@ def pull_mds_data(response_json, write_to_disk):
                         repository_name = repository_info[0][1] #response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories'][0].get('repository_study_link', '')
                         print(f"REpository study link for {guid} is {repository_study_link}")
                 data_type = ''
+                metadata['gen3_metadata'][guid]['data_type'] = ''
                 if 'data' in response_json[guid]['gen3_discovery']['study_metadata'] and \
                     'data_type' in response_json[guid]['gen3_discovery']['study_metadata']['data']:
                     is_data_type = len(response_json[guid]['gen3_discovery']['study_metadata']['data']['data_type']) > 0
                     if is_data_type:
                         data_type = '; '.join(response_json[guid]['gen3_discovery']['study_metadata']['data']['data_type'])
+                        metadata['gen3_metadata'][guid]['data_type'] = data_type
                 del metadata['gen3_metadata'][guid]['study_metadata']
             
             gen3_data_availability = response_json[guid]['gen3_discovery']['data_availability'] if 'data_availability' in response_json[guid]['gen3_discovery'].keys() else ''
@@ -215,7 +217,7 @@ def prep_gen3_metadata(df_gen3_metaadata):
             reguser = ''
         
         gen3_data_availability = rowdf.iloc[0]['gen3_data_availability']
-
+        data_type = rowdf.iloc[0]['data_type']
         return {
             'guid_type': guid_type,
             'study_name': str(projname).replace("'", "''"),
@@ -240,7 +242,8 @@ def prep_gen3_metadata(df_gen3_metaadata):
             'repository_selected': bool_string(len(repository_name) > 0 and study_producing_data),
             'gen3_data_availability': gen3_data_availability,
             'is_producing_data': bool_string(study_producing_data),
-            'is_producing_data_not_sharing': bool_string((study_producing_data and gen3_data_availability=='not_available'))
+            'is_producing_data_not_sharing': bool_string((study_producing_data and gen3_data_availability=='not_available')),
+            'data_type': data_type,
         }
     
     df1_null = df_gen3_metaadata.replace(np.nan, '')
