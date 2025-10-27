@@ -4,7 +4,6 @@ import mysql.connector
 from decimal import Decimal
 from datetime import datetime
 from dotenv import load_dotenv
-import pymysql
 
 class EnhancedEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -36,7 +35,7 @@ table_name = os.getenv('TABLE_NAME')
 def lambda_handler(event, context):
     appl_id = proj_num = hdp_id = ''
     results = []
-    
+
     try:
         appl_id = event['queryStringParameters'].get('appl_id', '')
         proj_num = event['queryStringParameters'].get('proj_num', '')
