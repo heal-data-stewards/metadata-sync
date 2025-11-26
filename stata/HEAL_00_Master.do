@@ -38,13 +38,14 @@ clear all
 * Today's date *;
 local xt: display %td_CCYY_NN_DD date(c(current_date), "DMY")
 local today = subinstr(trim("`xt'"), " " , "-", .)
-global today "`today'" 
-/*global today "2025-04-08" */
+/*global today "`today'" */ 
+global today "2025-11-26"
 
 /* ----- 2. Filepaths ----- */
 
 global dir "C:\Users\smccutchan\OneDrive - Research Triangle Institute\Documents\HEAL\MySQL"
 global raw $dir\Extracts
+global cal $dir\Raw\Calendly
 global der $dir\Derived
 global prog $dir\Programs
 global doc $dir\Documentation
@@ -57,7 +58,7 @@ global backups $dir\Backups
 /* ----- 3. Variables ----- */
 * Variables used to identify studies *;
 global stewards_id_vars proj_ser_num subproj_id proj_num_spl_sfx_code
-global key_vars study_id xstudy_id_stewards appl_id hdp_id num_appl_by_xstudyidstewards num_hdp_by_appl num_hdp_by_xstudyidstewards
+global key_vars study_id xstudy_id_stewards appl_id hdp_id archived num_appl_by_xstudyidstewards num_hdp_by_appl num_hdp_by_xstudyidstewards
 
 
 

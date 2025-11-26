@@ -67,7 +67,7 @@ drop _merge
 
 	* Dates *;
 	gen bgt_end=budget_end
-	foreach var in award_notice_date project_end_date bgt_end {
+	foreach var in award_notice_date project_end_date bgt_end bgt_strt {
 	gen x`var'=substr(`var',1,10)
 	gen `var'_date=date(x`var',"YMD")
 	format `var'_date %td
@@ -201,3 +201,5 @@ keep if row>225
 drop row
 save "$der/reporter_dqaudit_pt2.dta", replace
 export delimited using "$der/reporter_dqaudit_pt2.csv", nolab quote replace
+
+
