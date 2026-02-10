@@ -45,7 +45,9 @@ RENAME_DICT = {'proj_num':'Project #',
                     'archived':'Archived',
                     'heal_funded':'HEAL-Related',
                     'do_not_engage':'Do not Engage',
-                    'checklist_exempt_all':'Checklist Exempt'
+                    'data_type': 'Data Type',
+                    'checklist_exempt_all':'Checklist Exempt',
+                    'po_email': 'NIH PO Email'
                     }
 
 RENAME_DICT_MDS = {'project_num':'Project #',
@@ -195,11 +197,14 @@ def import_mysql_data(input_dir:Path, gt_file:pd.DataFrame, monday_board:pd.Data
     logging.info(f"Platform generated table has: {len(progress_tracker_df)} entries, with {len(get_unique_values(progress_tracker_df))} appl_ids")
     logging.info(f"Platform table has {len(get_unique_values(progress_tracker_df))} unique HDP IDs")
     pi_emails_df = pd.read_csv(input_dir/"pi_emails.csv", low_memory=False, dtype=convert_dict)
-    logging.info(f"Repo mapping table has: {len(pi_emails_df)} entrie, with {len(get_unique_values(pi_emails_df))} appl_ids")
+    logging.info(f"Repo mapping table has: {len(pi_emails_df)} entries, with {len(get_unique_values(pi_emails_df))} appl_ids")
     resnet_df = pd.read_csv(input_dir/"research_networks.csv", low_memory=False, dtype=convert_dict)
-    logging.info(f"Research Network table has: {len(resnet_df)} entrie, with {len(get_unique_values(resnet_df))} appl_ids")
+    logging.info(f"Research Network table has: {len(resnet_df)} entries, with {len(get_unique_values(resnet_df))} appl_ids")
     engagement_flags_df = pd.read_csv(input_dir/"engagement_flags.csv", low_memory=False, dtype=convert_dict)
-    logging.info(f"Engagment Flags table has: {len(engagement_flags_df)} entrie, with {len(get_unique_values(engagement_flags_df))} appl_ids")
+    logging.info(f"Engagment Flags table has: {len(engagement_flags_df)} entries, with {len(get_unique_values(engagement_flags_df))} appl_ids")
+    po_emails_df = pd.read_csv(input_dir/"po_emails.csv", low_memory=False, dtype=convert_dict)
+    logging.info(f"PO Emails table has: {len(po_emails_df)} entries, with {len(get_unique_values(po_emails_df   ))} appl_ids")
+
 
     logging.info("--- Wrangling PI Emails")
     ## Manipulate emails to carry forward emails from a previous appl_id to the most recent one according to the lookup table and email table
@@ -251,6 +256,7 @@ def import_mysql_data(input_dir:Path, gt_file:pd.DataFrame, monday_board:pd.Data
     mysql_fields_resnet = create_mysql_subset(resnet_df, extra_fields=['study_most_recent_appl'])
     mysql_fields_resnet['Research Network'] = [k.upper() if not pd.isna(k) else '' for k in mysql_fields_resnet['Research Network']]
     mysql_fields_enagementflags = create_mysql_subset(engagement_flags_df)
+    mysql_po_emails = create_mysql_subset(po_emails_df)
 
     logging.info("---- STEP 5: Gathering relevant data fields from MySQL tables")
     ## Combine all the fields into one table using "Most Recent Appl_ID" as the key. Monday Board will display information from the most recent appl_id for a project, which is available in mysql's study lookup table.
@@ -265,7 +271,9 @@ def import_mysql_data(input_dir:Path, gt_file:pd.DataFrame, monday_board:pd.Data
     logging.info(f"Number of fields after adding research network table fields: {len(data_merge_2)}")
     data_merge_1 = pd.merge(data_merge_2, mysql_fields_enagementflags, how='left', left_on='study_most_recent_appl', right_on='appl_id').drop(columns='appl_id')
     logging.info(f"Number of fields after adding engagegment flag table fields: {len(data_merge_1)}")
-    combined_data_ph1 = pd.merge(data_merge_1, mysql_fields_piemails, how='left', on='study_most_recent_appl')
+    data_merge_2 = pd.merge(data_merge_1, mysql_po_emails, how='left', left_on='study_most_recent_appl', right_on='appl_id').drop(columns='appl_id')
+    logging.info(f"Number of fields after adding PO Emai fields: {len(data_merge_2)}")
+    combined_data_ph1 = pd.merge(data_merge_2, mysql_fields_piemails, how='left', on='study_most_recent_appl')
     logging.info(f"Number of fields after adding PI Emails: {len(combined_data_ph1)}")
     logging.info(f"Total entries in this combined dataset: {len(combined_data_ph1.drop_duplicates())}")
     return combined_data_ph1
@@ -424,16 +432,17 @@ monday_board: Prior monday board export -- only used for reporting
 '''
 def export_finaldata(input_dir:Path, final_dataset:pd.DataFrame, mondayboard_missing_in_data:pd.DataFrame, monday_board:pd.DataFrame):
 
+    logging.info("******************* MONDAY COMPARISON  ******************************************")
     logging.info(f"Number records from Monday already in final dataset: {len(monday_board[monday_board.Name.isin(final_dataset.key)])}")
     ## How many of the keys from MOnday board are not there in looup fields
     mondayboard_missing_in_data = monday_board[~monday_board.Name.isin(final_dataset.key)]
-    logging.info(f"Number records from Monday that are not in lookup table (Consider these as discrepancies **Investigate**): {len(mondayboard_missing_in_data)}")
+    logging.info(f"Number records from Monday that are not in final dataset (Consider these as discrepancies **Investigate**): {len(mondayboard_missing_in_data)}")
     ## How many of the keys from lookup fields are not there in Monday??
     data_missing_in_mondayboard = final_dataset[~final_dataset.key.isin(monday_board.Name)]
-    logging.info(f"Number records from lookup table that are not on Monday (Potentially new entries): {len(data_missing_in_mondayboard)}")
+    logging.info(f"Number records from final dataset that are not on Monday (Potentially new entries): {len(data_missing_in_mondayboard)}")
 
-    logging.warning("****** Investigate/Delete the following entries on Monday that are not in there in the new Monday Excel upload")
-    logging.warning(mondayboard_missing_in_data)
+    logging.warning("****** Investigate/Delete the following entries on Monday that are not in the final dataset")
+    logging.warning(mondayboard_missing_in_data[['Name', 'Most Recent Appl_ID', 'study_type']].values)
 
     #having an index column is created as a temporary column and is integral to the QA process. See SOP for more specific notes.
     final_dataset.reset_index(drop=True, inplace=True)
@@ -441,11 +450,28 @@ def export_finaldata(input_dir:Path, final_dataset:pd.DataFrame, mondayboard_mis
 
     key_counts = final_dataset.groupby('key').size()
     t = key_counts.describe()
-    logging.info(f"Making sure uniqueness of key values. Do we have one row per key(HDPID/APPLID)? {bool(t['min'] == 1 and t['max'] == 1)}")
+    logging.info("******************* FINAL DATASET NUMBERS ******************************************")
+    logging.info(f"Number records in the final dataset: {len(final_dataset)}")
+    logging.info(f"Making sure uniqueness of key values. Do we have one row per key(HDPID/APPLID)? ::::  {bool(t['min'] == 1 and t['max'] == 1)}")
 
     outfile = input_dir/"MondayBoard_Update.xlsx"
+    logging.info("******************* EXPORTING ******************************************")
     logging.info(f"Exporting data to excel file at {outfile}")
-    final_dataset.to_excel(outfile, engine='xlsxwriter')
+    final_dataset.to_excel(outfile, engine='xlsxwriter', index=True)
+    batch_size = 1500
+    num_batches = (len(final_dataset) - 1) // batch_size + 1
+    for batch_num in range(num_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min((batch_num + 1) * batch_size, len(final_dataset))
+        
+        batch_df = final_dataset.iloc[start_idx:end_idx].copy()
+        
+        outfile = input_dir / f"MondayBoard_Update_batch_{batch_num + 1}_records_{start_idx + 1}_to_{end_idx}.xlsx"
+        logging.info(f"Exporting batch {batch_num + 1} ({end_idx - start_idx} records) to {outfile}")
+        
+        batch_df.to_excel(outfile, engine='xlsxwriter', index=True)
+    
+    logging.info("******************* DONE! ******************************************")
 
 # Run list_mds_data_dictionaries() if not used as a library.
 # Set up command line arguments.
