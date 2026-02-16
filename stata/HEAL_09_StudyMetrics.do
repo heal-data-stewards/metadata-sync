@@ -1,10 +1,10 @@
 /* -------------------------------------------------------------------------------- */
 /* Project: HEAL 																	*/
 /* PI: Kira Bradford																*/
-/* Program: HEAL_98_StudyMetrics													*/
+/* Program: HEAL_09_StudyMetrics													*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/06/23															*/
-/* Date Last Updated: 2025/04/25													*/
+/* Date Last Updated: 2025/12/11													*/
 /* Description:	This program produces a report of HDE study metrics.				*/
 /*		1. Number of NIH awards in MySQL											*/
 /*		2. Number of studies with VLMD on Platform									*/
@@ -14,9 +14,9 @@
 /*		6. Number of studies registered 											*/
 /*		7. Number of studies submitted SLMD											*/
 /*		8. Number of studies selected repo											*/
-/*		9. Number of studies with data linked on Platform							*/
-/*		10. Other: MySQL entities and awards										*/
-/*												*/
+/*		9. Count of how many studies selected each repo								*/
+/*		10. Number of studies with data linked on Platform							*/
+/*		11. Other: MySQL entities and awards										*/
 /*																					*/
 /* Notes:  																			*/
 /*		- Metrics should be calculated using only Platform data.					*/
@@ -26,6 +26,8 @@
 /*		  previous program HEAL_6Mo_Report.do; the latter has been archived.		*/
 /*																					*/
 /* Version changes																	*/
+/*		- 2025/12/11 - added count of how many studies selected each repo (#9)		*/
+/*		- 2025/06/16 - categories from Data Dictionary Tracker monday board changed */
 /*		- 2025/04/25 - Met w/ Kathy and Hina and removed conditional exclusion of	*/
 /*		  drop if gen3_data_availability=="not_available" from registration and		*/
 /*		  SLMD completion metrics.													*/
@@ -46,6 +48,7 @@ clear
 use "$der/mysql_$today.dta", clear
 drop if merge_awards_mds==1 /* keep only records that appear in Platform */
 keep if inlist(guid_type,"discovery_metadata","unregistered_discovery_metadata") /* keep only active records on the Platform */
+label var entity_type "Entity Type"
 save "$temp/metrics_$today.dta", replace
 
 
@@ -84,13 +87,17 @@ asdoc sum vlmd_available_platform, statistics(max) save($qc/StudyMetrics_$today.
 
 /* ----- 3. Number of studies with VLMD available in HSS ----- */
 asdoc, text(--------------3. Number of studies with VLMD available in HSS--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(See Vicki's report for most current number of studies with VLMD available in HSS.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text( ) fs(12), save($qc/StudyMetrics_$today.doc) append
+/*
+asdoc, text(--------------3. Number of studies with VLMD available in HSS--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
 asdoc, text(HDE Metric= Studies producing data for which VLMD is available in HSS. Estimated by the number of items in the Stewards 'Data Dictionary Tracker' board for which 'in HSS' = Yes and is from group = 'DD file in hand'.) save($qc/StudyMetrics_$today.doc) append label
 
 *  Read in monday.com spreadsheet export tabs *;
 * Note: Some manual reformatting of the Data Dictionary Tracker board export file was done to make it more machine readable. The separate table sections of the original export were all on one tab; these were manually moved to distinct tabs, and the tabs were name as defined in the following global macro. *;
-global tabs dd_file_in_hand /*engagement_in_progress no_vlmd_expected ctn_dds*/
+global tabs data_and_vlmd_platform vlmd_platform ctn_not_platform 
 foreach tab in $tabs {
-	import excel using "C:\Users\smccutchan\OneDrive - Research Triangle Institute\Documents\HEAL\monday_boards\Data_Dictionary_Tracker_1734110341.xlsx", sheet("`tab'") firstrow /*case(lower)*/ allstring clear
+	import excel using "C:\Users\smccutchan\OneDrive - Research Triangle Institute\Documents\HEAL\monday_boards\Data_Dictionary_Tracker_1750088146.xlsx", sheet("`tab'") firstrow /*case(lower)*/ allstring clear
 	foreach x of varlist * {
 		replace `x'=subinstr(`x', "`=char(10)'", "`=char(32)'", .) /* replace linebreaks inside cells with a space */
 		replace `x'=strtrim(`x')
@@ -104,11 +111,11 @@ foreach tab in $tabs {
 	save "$temp/`tab'.dta", replace
 	}
 	
-/*clear
+clear
 foreach tab in $tabs {
 	append using "$temp/`tab'.dta"
 	}
-*/
+
 gen vlmd_in_hss=0
 replace vlmd_in_hss=1 if InHSS=="Yes"
 label var vlmd_in_hss "VLMD in HSS"
@@ -123,7 +130,7 @@ use "$temp/monday_data.dta", clear
 keep if vlmd_in_hss==1
 asdoc sum vlmd_in_hss, statistics(N) save($qc/StudyMetrics_$today.doc) append label
 asdoc, text( ) fs(12), save($qc/StudyMetrics_$today.doc) append 
-
+*/
 
 
 
@@ -198,8 +205,63 @@ asdoc tab has_repo, miss save($qc/StudyMetrics_$today.doc) append label
 
 
 
-/* ----- 9. Number of studies with data linked on Platform ----- */
-asdoc, text(--------------9. Number of studies with data linked on Platform--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
+/* ----- 9. Number of studies selecting each repo ----- */
+asdoc, text(--------------9. Number of studies selecting each repo--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(Count of how many studies have selected each repo. One study may select >=1 repo. Studies who have not yet selected a repository are excluded. Tabulated from variable repository_metadata.) save($qc/StudyMetrics_$today.doc) append label
+
+use "$temp/metrics_$today.dta", clear
+drop if gen3_data_availability=="not_available"
+gen has_repo=.
+replace has_repo=0 if strtrim(repository_name)==""
+replace has_repo=1 if strtrim(repository_name)!=""
+drop if has_repo==0 /*Per Kathy slack thread on 12/11/25, exclude HDP IDs with no repository selection*/
+
+split repository_metadata, p("}")
+local numsplts=r(k_new)
+local lessone=`numsplts'-1
+keep hdp_id repository_metadata1-repository_metadata`lessone'
+reshape long repository_metadata, i(hdp_id) j(n)
+drop n
+drop if length(strtrim(repository_metadata))<=3
+split repository_metadata, parse(`"'"')
+keep hdp_id repository_metadata4
+	replace repository_metadata4="dbGaP" if repository_metadata4=="Database of Genotypes and Phenotypes (dbGaP)"
+	replace repository_metadata4="NBDC Data Hub" if repository_metadata4=="NIH Brain Development Cohorts (NBDC) Data Hub"
+	replace repository_metadata4="QDR" if repository_metadata4=="Qualitative Data Repository at Syracuse University"
+	replace repository_metadata4="NSRR" if repository_metadata4=="National Sleep Research Resource (NSRR)"
+	replace repository_metadata4="ODC-SCI" if repository_metadata4=="Open Data Commons for Spinal Cord Injury"
+	replace repository_metadata4="ICPSR" if repository_metadata4=="openICPSR"
+encode repository_metadata4, gen(repo)
+dummieslab repo, truncate(25)
+
+sort hdp_id repo
+foreach var of varlist BioSysticsAP- dbGaP {
+	by hdp_id: egen x`var'=max(`var')
+	replace x`var'=. if `var'==0
+	egen z`var'=count(x`var')
+	drop `var' x`var' 
+	rename z`var' `var'
+	}
+
+keep BioSysticsAP- dbGaP
+duplicates drop
+xpose,  varname clear
+
+rename _varname repo
+label var repo "Repository"
+order repo
+rename v1 count
+label var count "Number of studies"
+
+asdoc list repo count, title(Number of studies selecting each repo) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(Note: Some repository names have been shortened or acronyms used due to space limitations. Some repositories listed may not appear on the current published version of the HEAL-compliant Repository list.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(Note: The Platform has 2 separate tags for ICPSR and for openICPSR. These have been combined in the ICPSR count as shown above.) save($qc/StudyMetrics_$today.doc) append label
+
+
+
+
+/* ----- 10. Number of studies with data linked on Platform ----- */
+asdoc, text(--------------10. Number of studies with data linked on Platform--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
 asdoc, text(HDE Metric= % of studies producing and sharing data which have data linked on the Platform. Estimated using data_linked_on_platform, which is a field created in the progress_tracker table by the code that moves MDS data into MySQL.) save($qc/StudyMetrics_$today.doc) append label
 
 use "$temp/metrics_$today.dta", clear
@@ -210,8 +272,8 @@ asdoc tab data_linked_on_platform, miss save($qc/StudyMetrics_$today.doc) append
 
 
 
-/* ----- 10. Other: MySQL entities and awards ----- */
-asdoc, text(--------------10. Other: MySQL entities and awards--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
+/* ----- 11. Other: MySQL entities and awards ----- */
+asdoc, text(--------------11. Other: MySQL entities and awards--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
 
 * Number of CTN protocols *;
 use "$der/mysql_$today.dta", clear
@@ -246,11 +308,12 @@ asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
 
 * Awards in MySQL by entity type *;
 use "$der/mysql_$today.dta", clear
+label var entity_type "Entity Type"
 drop if merge_awards_mds==2
 keep appl_id entity_type
 sort appl_id
 duplicates drop
-merge 1:1 appl_id using "$der/research_networks.dta"
+merge 1:1 appl_id using "$raw/research_networks_$today.dta"
 replace entity_type="CTN Protocol" if res_net=="CTN"
 asdoc tab entity_type, title(appl_ids by entity type) save($qc/StudyMetrics_$today.doc) append label
-asdoc, text(This tabulation shows the number of awards belonging to each type of entity. Here, the number for CTN Protocol indicates the total number of appl_ids associated with the 40 CTN Protocol numbers. The 'Other' entity type indicates 6 awards that do not have project serial numbers and appear to be contracts or other agreements - these 6 are listed out in the regular QC Report. Every other appl_id in the MySQL DB belongs to a Study, where 'study' is defined by the Stewards.) save($qc/StudyMetrics_$today.doc) append label
+asdoc, text(This tabulation shows the number of awards belonging to each type of entity. Here, the number for CTN Protocol indicates the total number of appl_ids associated with any CTN Protocol numbers. The 'Other' entity type indicates 6 awards that do not have project serial numbers and appear to be contracts or other agreements - these 6 are listed out in the regular QC Report. Every other appl_id in the MySQL DB belongs to a Study, where 'study' is defined by the Stewards.) save($qc/StudyMetrics_$today.doc) append label

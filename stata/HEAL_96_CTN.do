@@ -5,7 +5,7 @@
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/06/17															*/
 /* Date Last Updated: 2024/08/19													*/
-/* Description:	This Stata program generates a crosswalk for Clinical Trials Network*/
+/* Description:	This program generates a crosswalk for Clinical Trials Network		*/
 /*	protocols and associated project numbers. It identifies application IDs that 	*/
 /*	belong to project numbers identified by responsible SMEs as part of the Clinical*/
 /*  Trials Network (CTN).															*/

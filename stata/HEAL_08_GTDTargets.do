@@ -1,138 +1,314 @@
 /* -------------------------------------------------------------------------------- */
 /* Project: HEAL 																	*/
-/* PI: Kira Bradford																*/
-/* Program: HEAL_scratch															*/
+/* RTI PI: Kira Bradford															*/
+/* Program: HEAL_08_GTDTargets														*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
-/* Date Created: 2024/05/13															*/
-/* Date Last Updated: 2024/12/04													*/
+/* Date Created: 2026/02/03															*/
+/* Date Last Updated: 2026/02/12													*/
 /* Description:	This program performs ad-hoc queries.								*/
 /*																					*/
 /* Notes:  																			*/
-/*		- 2024/06/11 reversed order of queries so new queries are added to top of	*/
-/*					 program.														*/
+/*	-2026/02/02 pulled historic queries out of scratch file 						*/
 /*																					*/
 /* -------------------------------------------------------------------------------- */
+
+
+/* --------------------------- */
+/* ------- PARAMETERS -------- */
+/* --------------------------- */
+/*
+
+Include the following columns:
+	appl_id
+	Project Number
+	Contact PI Name (First and Last)
+	Contact PI Email
+	NIH Reporter Link
+	Project Start Date
+	Project End Date
+	SBIR/STTR
+	heal_funded
+	HDP ID
+	xstudy_id
+	study_first_appl
+	study_most_recent_appl
+	study_hdp_id
+	study_hdp_id_appl
+	checklist exempt
+	Research Network 
+	Project titles: proj_title (reporter) & project_title (platform)
+	
+* - FILTERS - *;
+For Get the Data target list:
+- Keep if the study's latest known proj_end_date is in 2026 
+- Keep the study_most_recent_appl to represent the study
+- Exclude "do not engage"
+- Drop studies with archived HDP IDs
+
+For Early Award target list:
+- Keep if the study's earliest known project start date is in 2025
+   * Note: confirm this results in 1 appl_id per xstudy_id, and add filtering if it doesn't
+- Exclude records flagged "do not engage"
+- Exclude SBIR/STTR
+- Drop studies with archived HDP IDs
+- Drop targets that were on the Get the Data target list
+
+Other information to provide the PMs:
+- MySQL Data Dictionary link
+- Exported full study_lookup_table (maybe)
+
+
+*/
+
+
+
+
+
+
+/* ----- Query: 2026/02/03 ----- */
+/* Note: Updated 2026/02/12 to add project title columns from both reporter & platform data sources, and to apply res_net designation at study level not appl_id level */
 
 
 clear all 
 
 
-/* ---------------------- */
-/* ------- QUERY -------- */
-/* ---------------------- */
 
+/* ----- 1. Prepare data ----- */
 
-/* ----- Query: 2024/12/04	----- */
-/* Note: Gabi over email requested "a list of research network studies expiring in 2025". */
-
-* Get 1 value of res_net for each xstudy_id *;
-use "$der/study_lookup_table.dta", clear
+* Import pi _emails *;
+foreach dtaset in pi_emails_$today {
+import delimited using "$raw/`dtaset'.csv", varnames(1) stringcols(_all) bindquote(strict) favorstrfixed clear
+	foreach x of varlist * {
+		replace `x'=subinstr(`x', "`=char(10)'", "`=char(32)'", .) /* replace linebreaks inside cells with a space */
+		replace `x'=strtrim(`x')
+		replace `x'=stritrim(`x')
+		replace `x'=ustrtrim(`x')
+		}
+		
 sort appl_id
-merge m:1 appl_id using "$der/research_networks.dta"
+save "$raw/`dtaset'.dta", replace
+}
+
+
+* Get all Reporter data rows stacked up *;
+use "$der/mysql_$today.dta", clear /*n=2516*/
+append using "$der/reporter_dqaudit.dta" /*n=3005*/
+sort appl_id
+order appl_id
+drop if appl_id==""
+drop compound_key
+sort appl_id hdp_id
+egen compound_key=concat(appl_id hdp_id), punct(_)
+save "$temp/xalldata_$today.dta", replace /*n=2953*/
+
+
+* Merge to study_lookup_table *;
+use "$der/study_lookup_table.dta", clear /*n=2661*/
+sort compound_key
+merge m:1 compound_key using "$temp/xalldata_$today.dta"
+drop if _merge==2 /* n=304 dropped; these are non-study entities (CTN protocols or Others)*/
+drop _merge 
+
+replace res_net=upper(res_net)
+
+merge m:1 appl_id using "$der/engagement_flags.dta", keepusing(do_not_engage checklist_exempt_all)
 drop if _merge==2
-drop _merge res_net_override_flag
+drop _merge
+
+merge m:1 appl_id using "$raw/pi_emails_$today.dta", keepusing(pi_email)
+drop if _merge==2
+drop _merge
+
+sort xstudy_id
+save "$temp/gtd_targets_$today.dta", replace /*n=2660*/
+
+
+* Apply the latest non-missing pi_email for the study to rows where pi_email is missing *;
+use "$temp/gtd_targets_$today.dta", clear
+keep if pi_email!=""
+gen study_pi_email=""
+	
+replace study_pi_email=pi_email if appl_id==study_most_recent_appl
+	
+by xstudy_id: gen n=_n
+by xstudy_id: egen num_rows=max(n)
+	
+replace study_pi_email=pi_email if study_pi_email=="" & num_rows==1
+	
+	
+gen xstudy_has_email=0
+replace xstudy_has_email=1 if study_pi_email!=""
+sort xstudy_id xstudy_has_email
+by xstudy_id: egen indic=max(xstudy_has_email)
+sort indic xstudy_id proj_end_date_date
+
+drop if indic==1 & xstudy_has_email==0
+
+	/*note: temporary time-saving rule. manually checked and all rest are dupes*/
+	replace study_pi_email=pi_email if study_pi_email=="" 
+	
+keep xstudy_id study_pi_email
+duplicates drop
+duplicates list xstudy_id
+sort xstudy_id
+save "$temp/pi_emails_key.dta", replace
+
+
+* Apply the non-missing res_net for the study to rows where res_net is missing *;
+use "$temp/gtd_targets_$today.dta", clear
+keep if res_net!=""
 keep xstudy_id res_net
 sort xstudy_id res_net
-duplicates drop /*n=1419*/
-	* check uniqueness *;
-	egen xgroups=group(xstudy_id res_net), miss
-	by xstudy_id: egen max_xgroups=max(xgroups)
-	gen xnon_unique_study=1 if max_xgroups!=xgroups
-	by xstudy_id: egen non_unique_study=max(xnon_unique_study)
-	browse if non_unique_study==1 /* Note; 12/4/24, there are never 2 diff values of res_net for the same study_id, only one missing and one non-missing value of res_net */
-	drop if non_unique_study==1 & res_net==""
-keep xstudy_id res_net
+duplicates drop
+by xstudy_id: gen n=_n
+by xstudy_id: egen num_rows=max(n)
+
+tab num_rows
+	/* note: only tabbed # is 1, meaning there are no conflicting values of res_net within any xstudy_id */
+
 rename res_net study_res_net
-duplicates list xstudy_id
-save "$temp/study_res_net_key.dta", replace
+keep xstudy_id study_res_net
+save "$temp/res_net_key.dta", replace
+
+
+
+* Find live/archived status of study_hdp_id *;
+use "$raw/progress_tracker_$today.dta", clear
+keep hdp_id archived
+sort hdp_id
+rename hdp_id study_hdp_id
+rename archived study_hdp_status
+save "$temp/livearchkey.dta", replace
+
+
+
+* Merge in found maxes of key variables *;
+use "$temp/gtd_targets_$today.dta", clear
+merge m:1 xstudy_id using "$temp/pi_emails_key.dta", keepusing(study_pi_email)
+drop _merge
+
+merge m:1 xstudy_id using "$temp/res_net_key.dta"
+drop _merge
+
+sort study_hdp_id
+merge m:1 study_hdp_id using "$temp/livearchkey.dta"
+drop if _merge==2
+drop _merge
+
+rename proj_title project_title_reporter
+rename project_title project_title_platform
+
+order study_hdp_status, after(study_hdp_id)
+sort xstudy_id fisc_yr
+save "$out/GTD_Targets/gtd_targets_$today.dta", replace
+
+
+
+
+
+
+
+
+/* ----- 2. Get the Data Target List ----- */
+use "$out/GTD_Targets/gtd_targets_$today.dta", clear
+
+	* Limit to studies where the latest known project end date is in 2026 *;
+	sort xstudy_id proj_end_date_date
+	by xstudy_id: egen latest_end_date=max(proj_end_date_date) /*n=9 missing values generated */
+	gen latest_end_yr=year(latest_end_date)
+	tab latest_end_yr
+	keep if latest_end_yr==2026 /*n=773*/
+	
+	/*	* Check: # unique study IDs *;
+		keep xstudy_id
+		sort xstudy_id
+		duplicates drop 
+		save "$temp/gtd_studies_filter1.dta", replace /*n=367*/
+	*/
+	
+	* Keep the most recent appl_id left to represent the study *;
+	keep if appl_id==study_most_recent_appl /*n=367*/
+	duplicates list xstudy_id
+	
+	* Exclude do not engage *;
+	drop if do_not_engage==1 /*n=98 deleted */
+	
+	* Exclude if the study_hdp_id is archived *;
+	drop if study_hdp_status=="archived" /*n=206*/
+
+	keep appl_id proj_num ctc_pi_nm study_pi_email proj_url proj_strt_date proj_end_date fund_mech heal_funded nih_core_cde hdp_id xstudy_id study_hdp_id study_hdp_id_appl study_first_appl study_most_recent_appl do_not_engage checklist_exempt_all study_res_net project_title_reporter project_title_platform
+	order appl_id proj_num ctc_pi_nm study_pi_email proj_url proj_strt_date proj_end_date fund_mech heal_funded nih_core_cde hdp_id xstudy_id study_hdp_id study_hdp_id_appl study_first_appl study_most_recent_appl do_not_engage checklist_exempt_all study_res_net project_title_reporter project_title_platform
+sort study_res_net checklist_exempt proj_end_date
+	save "$out/GTD_Targets/gtd_general.dta", replace	
+	
+export excel using "$out/GTD_Targets/gtd_targets_2026_$today.xlsx", sheet("gtd") firstrow(var) nolabel keepcellfmt replace
+
+
+			* Create key of STUDIES on the GTD target list *;
+			use "$out/GTD_Targets/gtd_general.dta", clear
+			keep xstudy_id
+			sort xstudy_id
+			duplicates drop
+			gen on_gtd_list=1
+			save "$temp/ongtds.dta", replace
+
 	
 
-* Prep study info *;
-use "$der/study_lookup_table.dta", clear
-destring xstudy_id, generate(study_id_final)
-sort xstudy_id
-merge m:1 xstudy_id using "$temp/study_res_net_key.dta"
-drop _merge
-sort appl_id
-merge m:1 appl_id using "$der/engagement_flags.dta"
-drop _merge xstudy_id study_hdp_id_appl
-order study_id_final
-sort study_id_final study_most_recent_appl study_hdp_id 
-drop appl_id
-duplicates drop 
-save "$temp/study_info.dta", replace /*n=1415*/
+* Early Awards Target List *;
+use "$out/GTD_Targets/gtd_targets_$today.dta", clear
 
-* Prep full dataset for appl_ids belonging to a study */
-use "$der/mysql_$today.dta", clear /*n=1988*/
-drop if mds_ctn_flag==1  /*n=40 dropped */
-drop if proj_ser_num=="" /*n=6 dropped*/
-egen compound_key=concat(appl_id hdp_id), punct(_)
-
-* Merge study info *;
-merge 1:1 compound_key using "$doc/studyidkey.dta", keepusing(study_id_final)
-drop _merge
-merge m:1 study_id_final using "$temp/study_info.dta"
-drop _merge /*n=1942*/
-
-* Exclusion criteria *;
-drop if entity_type!="Study" /*n=0 dropped*/
-drop if study_res_net=="" /*n=1199 dropped*/
-drop if merge_awards_mds==2 /*n=0 dropped*/
-drop if do_not_engage==1 /*n=0*/
-	* N=557 remaining *;
+	* Limit to studies where the earliest known project start date is in 2025 (the project start date of the study_first_appl)*;
+	sort xstudy_id proj_strt_date_date
+	by xstudy_id: egen first_strt_date=min(proj_strt_date_date) /*n=43 missing values generated */
+	gen first_strt_yr=year(first_strt_date)
+	tab first_strt_yr
+	keep if first_strt_yr==2025 /*n=119*/
 	
-* Expiring in 2025 *;
-* Note: interpreted as latest appl_id for project ends in 2025 *;
-gen year_end=year(proj_end_date_date) if study_most_recent_appl==appl_id /*n=130 missing values */
-keep if year_end==2025 /*n=42 left*/
+	* Exclude do not engage *;
+	drop if do_not_engage==1 
+	
+	* Exclude SBIR/STTR *;
+	drop if fund_mech=="SBIR/STTR" /*n=103 */
+	
+	/*	* Check: # unique study IDs *;
+		keep xstudy_id
+		sort xstudy_id
+		duplicates drop 
+		save "$temp/gtd_studies_filter3.dta", replace /*n=103*/
+	*/
+	
+	* Exclude if the study_hdp_id is archived *;
+	drop if study_hdp_status=="archived" /*n=0 dropped*/
+	
+	* Drop targets already on the GtD tab list *;
+	merge 1:1 xstudy_id using "$temp/ongtds.dta"
+	keep if _merge==1
+	drop on_gtd_list _merge
+	
+	keep appl_id proj_num ctc_pi_nm study_pi_email proj_url proj_strt_date proj_end_date fund_mech heal_funded nih_core_cde hdp_id xstudy_id study_hdp_id study_hdp_id_appl study_first_appl study_most_recent_appl do_not_engage checklist_exempt_all study_res_net project_title_reporter project_title_platform
+	order appl_id proj_num ctc_pi_nm study_pi_email proj_url proj_strt_date proj_end_date fund_mech heal_funded nih_core_cde hdp_id xstudy_id study_hdp_id study_hdp_id_appl study_first_appl study_most_recent_appl do_not_engage checklist_exempt_all study_res_net project_title_reporter project_title_platform
+sort study_res_net checklist_exempt proj_end_date
+	save "$out/GTD_Targets/gtd_earlyaward.dta", replace
+	
+	
+export excel using "$out/GTD_Targets/gtd_targets_2026_$today.xlsx", sheet("earlyawards") firstrow(var) nolabel keepcellfmt 
 
-* Output results *;
-keep study_id_final year_end study_most_recent_appl study_hdp_id study_res_net
+	
+	
 
-sort study_most_recent_appl study_hdp_id
-export delimited using "$out/resnets_ending_2025.csv", quote replace
+	
+	
+	
+* Pull visuals for slidedeck *;
+use "$out/GTD_Targets/gtd_targets_$today.dta", clear
 
-
-
-
-/* ----- Query: 2024/10/01	----- */
-/* Note: RJ over email requested "a list of independent studies and SBIR's expiring in 2025". */
-
-* Prep study info *;
-use "$der/study_lookup_table.dta", clear
-drop appl_id
-destring xstudy_id, generate(study_id_final)
-drop xstudy_id
-order study_id_final
-sort study_id_final study_most_recent_appl study_hdp_id 
-duplicates drop 
-save "$temp/study_info.dta", replace /*n=1214*/
+order xstudy_id $stewards_id_vars hdp_id archived appl_id proj_num fisc_yr proj_strt_date proj_end_date 
+destring xstudy_id, replace
+sort proj_ser_num xstudy_id
+keep if inlist(xstudy_id,11,12,26,27,28,29,30,1056,1057,612,613)
+keep xstudy_id-study_first_appl proj_title study_name res_net
 
 
-* Merge res_net *;
-use "$der/mysql_$today.dta", clear /*n=1719*/
-egen compound_key=concat(appl_id hdp_id), punct(_)
-sort appl_id
-merge m:1 appl_id using "$der/research_networks.dta"
-drop _merge
-merge 1:1 compound_key using "$doc/studyidkey.dta", keepusing(study_id_final)
-drop _merge
-merge m:1 study_id_final using "$temp/study_info.dta"
-drop _merge
 
-* Exclusion criteria *;
-drop if entity_type!="Study" /*n=46 dropped*/
-drop if merge_awards_mds==2 /*n=2 dropped*/
-keep if res_net=="" /*n=739 dropped*/
+	
 
-* Expiring in 2025 *;
-gen year_end=year(proj_end_date_date)
-keep if year_end==2025 /*n=133 left*/
-
-* Output results *;
-keep appl_id hdp_id fisc_yr fund_mech year_end study_id_final study_id_final study_hdp_id study_hdp_id_appl merge_awards_mds
-
-	browse if hdp_id=="" /* Note: these do make it into study_lookup_table */
-
-sort fund_mech appl_id hdp_id
-export delimited using "$out/appls_ending_2025.csv", quote replace

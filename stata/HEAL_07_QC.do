@@ -1,10 +1,10 @@
 /* -------------------------------------------------------------------------------- */
 /* Project: HEAL 																	*/
-/* PI: Kira Bradford													*/
-/* Program: HEAL_99_QC																*/
+/* PI: Kira Bradford																*/
+/* Program: HEAL_07_QC																*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/05/07															*/
-/* Date Last Updated: 2025/01/27													*/
+/* Date Last Updated: 2026/02/10													*/
 /* Description:	This program creates a QC report for data contained in MySQL. 		*/				
 /*		1. progress_tracker table 													*/
 /*		2. awards table																*/
@@ -12,7 +12,8 @@
 /*		4. Metrics by Study  														*/
 /*																					*/
 /* Notes:  																			*/
-/*		- */
+/*		- Added an if condition to prevent errors when no observations exist that	*/
+/*		  meet the selection criteria.												*/
 /*																					*/
 /* -------------------------------------------------------------------------------- */
 
@@ -98,13 +99,18 @@ if merge_reporter_awards!=3 {
 
 
 * -- MySQL (Awards+reporter) and MDS (progress_tracker) -- *;
-use "$der/mysql_$today.dta", clear 
+use "$der/mysql_$today.dta", clear
+drop if entity_type=="CTN" /*note: since this is a comparison of appl_ids in both tables, exclude CTNs in MDS, which don't have an appl_id */ 
 asdoc tab merge_awards_mds, title(3C. Compare: MySQL [reporter & awards] and MDS) save($qc/QCReport_$today.doc) append label
 keep if merge_awards_mds==2
 drop if mds_ctn_number!=""
 keep appl_id hdp_id mds_ctn_number merge_awards_mds
 sort appl_id
-asdoc list *, title(3D. List of appl_ids in MDS only, but not in NIH-source MySQL tables, excluding CTN protocol HDP IDs) save($qc/QCReport_$today.doc) append label
+count
+if r(N) > 0 {
+	di "`r(N)'"
+	asdoc list *, title(3D. List of appl_ids in MDS only, but not in NIH-source MySQL tables, excluding CTN protocol HDP IDs) save($qc/QCReport_$today.doc) append label
+	}
 
 
 
@@ -133,4 +139,30 @@ label values study_has_hdp yn
 label define yn 0 "No" 1 "Yes"
 asdoc, text(--------------HDP_ID missingness, by study--------------) fs(12), save($qc/QCReport_$today.doc) append
 asdoc tab study_has_hdp, title(4B. Number of studies with/out a HDP ID) save($qc/QCReport_$today.doc) append label
+
+
+
+
+
+/* ----- 5. Entity Types ----- */
+asdoc, text(--------------5. Entity Types--------------) fs(14), save($qc/QCReport_$today.doc) append
+* Entity type rules*;
+asdoc, text(--------------5A. Entity Type Rules--------------) fs(12), save($qc/QCReport_$today.doc) append 
+asdoc, text(There are 3 entity types in our data: Study  CTN Protocol  & Other. Every record is assigned Study for entity_type by default. The entity type is changed to CTN or Other if it meets one of the following conditions:) save($qc/QCReport_$today.doc) append label
+asdoc, text(replace entity_type=CTN if the project_num field in Platform/progress_tracker table data is a CTN Protocol number) save($qc/QCReport_$today.doc) append label
+asdoc, text(replace entity_type=CTN if res_net==CTN) save ($qc/QCReport_$today.doc) append label
+asdoc, text(replace entity_type=Other if the project_num field in Platform/progress_tracker table data does not match the default project number format for grants. For example an OT contract like the Stewards would be replaced entity_type="Other") save($qc/QCReport_$today.doc) append label
+asdoc, text(replace entity_type=Other if appl_id==0) save($qc/QCReport_$today.doc) append label
+
+* Entity type reporting*;
+asdoc, text(--------------5B. Entity Type: Other--------------) fs(12), save($qc/QCReport_$today.doc) append 
+asdoc, text(This section lists records that are tagged as entity_type=Other.) save($qc/QCReport_$today.doc) append label
+use "$der/mysql_$today.dta", clear
+keep if entity_type=="Other"
+order appl_id proj_num hdp_id archived 
+keep appl_id proj_num hdp_id archived 
+asdoc list *, title(5B. List of records where entity_type=Other) save($qc/QCReport_$today.doc) append label
+
+
+
 

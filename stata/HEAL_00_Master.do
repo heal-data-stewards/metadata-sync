@@ -4,14 +4,15 @@
 /* Program: HEAL_00_Master															*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/02/29															*/
-/* Date Last Updated: 2025/04/25													*/
+/* Date Last Updated: 2026/01/16													*/
 /* Description:	This is the master Stata program for MySQL data processing. It sets	*/
 /* global macros before calling the following programs:								*/
-/*		1. Import & merge data														*/
-/*		2. Generate Research Networks Documentation Tables							*/
+/*		1. Generate Research Networks Documentation Tables							*/
+/*		2. Import & merge data														*/
 /*		3. Generate Study Table														*/
 /*		4. Generate CTN crosswalk and outputs										*/
 /*		5. Generate engagement_flags table											*/
+/*		6. Generate Get the Data target lists										*/
 /*		97. Perform data quality audit on Reporter									*/
 /*		98. Generate study metrics report											*/
 /*		99. Generate QC report														*/
@@ -38,8 +39,8 @@ clear all
 * Today's date *;
 local xt: display %td_CCYY_NN_DD date(c(current_date), "DMY")
 local today = subinstr(trim("`xt'"), " " , "-", .)
-/*global today "`today'" */ 
-global today "2025-11-26"
+global today "`today'"
+/*global today "2026-02-12"*/
 
 /* ----- 2. Filepaths ----- */
 
@@ -53,6 +54,7 @@ global temp $dir\temp
 global qc $dir\Output\QC
 global out $dir\Output
 global backups $dir\Backups
+global nih $dir\NIH_Data
 
 
 /* ----- 3. Variables ----- */
@@ -67,29 +69,53 @@ global key_vars study_id xstudy_id_stewards appl_id hdp_id archived num_appl_by_
 * Define value labels *;
 do "$prog/HEAL_valuelabels"
 
-/* ----- 1. Import latest MySQL data ----- */
-do "$prog/HEAL_01_ImportMerge.do"
 
-/* ----- 2. Generate Research Network Documentation Tables ----- */
-do "$prog/HEAL_02_ResNetDocTables.do"
 
-/* ----- 3. Generate Study Table ----- */
-do "$prog/HEAL_03_StudyTable.do"
+/* ----- DATA MANAGEMENT PROGRAMS -----*/
 
-/* ----- 4. Generate CTN crosswalk and outputs ----- */
-do "$prog/HEAL_04_CTN.do"
+/* ----- 1. Generate Research Network Documentation Tables ----- */
+do "$prog/HEAL_01_ResNetDocTables.do"
+
+/* ----- 2. Import latest MySQL data ----- */
+do "$prog/HEAL_02_ImportMerge.do"
+
+/* ----- 3. Perform data quality audit on Reporter ----- */
+do "$prog/HEAL_03_DQAudit.do"
+
+/* ----- 4. Generate Study Table ----- */
+do "$prog/HEAL_04_StudyTable.do"
 
 /* ----- 5. Generate Engagement table ----- */
 do "$prog/HEAL_05_EngagementTable.do"
 
-/* ----- 97. Perform data quality audit on Reporter ----- */
-do "$prog/HEAL_97_DQAudit.do"
+/* ----- 6. Compile data tables by study ----- */
+do "$prog/HEAL_06_CompilebyStudy.do"
 
-/* ----- 98. Generate study metrics report ----- */
-do "$prog/HEAL_98_StudyMetrics.do"
 
-/* ----- 99. Generate QC report ----- */
-do "$prog/HEAL_99_QC.do"
+
+/* ----- REPORTING PROGRAMS -----*/
+
+/* ----- 7. Generate QC report ----- */
+do "$prog/HEAL_07_QC.do"
+
+/* ----- 8. Generate Get the Data target lists ----- */
+do "$prog/HEAL_08_GTDTargets.do"
+
+/* ----- 9. Generate study metrics report ----- */
+do "$prog/HEAL_09_StudyMetrics.do"
+
+
+
+/* ----- OTHER PROGRAMS -----*/
+
+/* ----- 96. Generate CTN crosswalk and outputs ----- */
+do "$prog/HEAL_96_CTN.do"
+
+
+
+
+
+
 
 
 
