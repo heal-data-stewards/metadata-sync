@@ -371,6 +371,14 @@ def combine_mysql_ctn(mysql_data:pd.DataFrame, ctn_data:pd.DataFrame):
 
     return all_data
 
+def parse_date(val):
+    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(str(val), fmt).date()
+        except (ValueError, TypeError):
+            continue
+    return None
+
 '''
 Prepare the data set for import to Monday HEAL Studies board
 
@@ -393,9 +401,20 @@ def prepare_for_monday(all_data:pd.DataFrame):
     combined_data['Location'] = [c+","+s for (c,s) in combined_data[['City', "State"]].values]
 
     ## Convert dates to ISO format
-    combined_data['Project Start'] = pd.to_datetime(combined_data['Project Start'], format='%Y-%m-%d', errors='coerce').dt.date
-    combined_data['Project End'] = pd.to_datetime(combined_data['Project End'], format='%Y-%m-%d', errors='coerce').dt.date
+    combined_data['Project Start'] = combined_data['Project Start'].apply(parse_date)
+    # pd.to_datetime(combined_data['Project Start'], 
+    #                                                 format=None, 
+    #                                                 errors='coerce',
+    #                                                 infer_datetime_format=True).dt.date
+    combined_data['Project Start'] = combined_data['Project Start'].fillna('-')
+    combined_data['Project End'] = combined_data['Project End'].apply(parse_date)
+    # pd.to_datetime(combined_data['Project End'], 
+    #                                               format=None, 
+    #                                               errors='coerce',
+    #                                               infer_datetime_format=True).dt.date
+    combined_data['Project End'] = combined_data['Project End'].fillna('-')
     combined_data['Platform Reg Time'] = pd.to_datetime(combined_data['Platform Reg Time'], utc=True).dt.date
+    combined_data['Platform Reg Time'] = combined_data['Platform Reg Time'].fillna('-')
 
     ## Change archived column to have "archived/n" values and Y/N type values in HEAL-related and SBIR/STTR columns
     combined_data['Archived'] = [a if a=='archived' else 'n' for a in combined_data['Archived']]
@@ -458,7 +477,7 @@ def export_finaldata(input_dir:Path, final_dataset:pd.DataFrame, mondayboard_mis
     logging.info("******************* EXPORTING ******************************************")
     logging.info(f"Exporting data to excel file at {outfile}")
     final_dataset.to_excel(outfile, engine='xlsxwriter', index=True)
-    batch_size = 1500
+    batch_size = 1400
     num_batches = (len(final_dataset) - 1) // batch_size + 1
     for batch_num in range(num_batches):
         start_idx = batch_num * batch_size
