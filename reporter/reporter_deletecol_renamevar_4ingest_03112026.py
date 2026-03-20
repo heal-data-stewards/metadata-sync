@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Created on Tue Jan 20 13:17:53 2026
-updated on Wed March 11 14:31:45 2026: deleted colums based on MySQL team decission
+update Wednesday March 11 14:31:45 2026: deleted colums based on MySQL team decission
+update Friday March 20 14:09:01 2026: rename column spd_cat_[0] to spd_cat_des
 
 @author: mariad
 """
@@ -107,7 +108,7 @@ rename_map = {
     "project_serial_num":"proj_ser_num",
     "project_start_date":"proj_strt_date",
     "project_title":"proj_title",
-    "spending_categories_desc":"spd_cat_[0]",
+    "spending_categories_desc":"spd_cat_des",
     "subproject_id":"subproj_id",
     "terms":"trms",
     "date_added":"date_added"
