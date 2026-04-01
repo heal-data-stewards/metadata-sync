@@ -12,8 +12,10 @@ Created on Tue Jan 20 13:17:53 2026
 import pandas as pd
 
 # Read CSV
+input_file = "/Users/hinashah/Documents/HEAL/ReporterCode/Output/heal_awards_FEB_2026.csv"
+output_file = "/Users/hinashah/Documents/HEAL/ReporterCode/Output/reporter_FEB_2026.csv"
 df = pd.read_csv(
-    r"C:\Users\mariad\Downloads\heal_awards_reporter_all_01212026.csv"
+   input_file
 )
 
 # 1️DROP columns you do NOT want
@@ -119,6 +121,6 @@ df.rename(columns=rename_map, inplace=True)
 
 # Save result
 df.to_csv(
-    r"C:\Users\mariad\Downloads\reporter_01212025.csv",
+    output_file,
     index=False
 )
