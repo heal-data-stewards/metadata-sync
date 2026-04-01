@@ -110,7 +110,7 @@ def lambda_handler(event, context):
 
         # Combine appl_ids from both tables and remove duplicates
         combined_ids = (
-            pd.concat([awards_db['appl_id'], pd.Series(list(old_ids))])
+            pd.concat([awards_db[awards_db['appl_id']!='']['appl_id'], pd.Series(list(old_ids))])
             .dropna()
             .drop_duplicates()
             .reset_index(drop=True)
@@ -133,6 +133,7 @@ def lambda_handler(event, context):
 
         # Compute what changed
         new_ids = set(reporter_df['appl_id'].astype(str))
+        old_ids = set(combined_ids)
         added = sorted(new_ids - old_ids)
         removed = sorted(old_ids - new_ids)
 
