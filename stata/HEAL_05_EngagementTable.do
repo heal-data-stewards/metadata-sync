@@ -6,7 +6,7 @@
 /* Date Created: 2024/12/03															*/
 /* Date Last Updated: 2026/02/03													*/
 /* Description:	This program creates the engagement_flags table, which contains 	*/
-/*	 several indicators that are new for PM use as of the FY24 new awards batch.	*/
+/*	 indicators for "do not engage" & "checklist exempt" statuses.					*/
 /*		1. Create flags																*/
 /*		2. Generate Engagement Table 												*/
 /*																					*/
@@ -39,10 +39,10 @@ drop _merge res_net_override_flag
 
 * Do not engage *;
 gen do_not_engage=0
-replace do_not_engage=1 if act_code=="T90" | act_code=="R90"
-replace do_not_engage=1 if nih_foa_heal_lang=="0" | nih_noa_heal_lang=="0"
+replace do_not_engage=1 if inlist(act_code,"T90","R90","K99")
+replace do_not_engage=1 if nih_foa_heal_lang=="0" | nih_noa_heal_lang=="0" /* Note: a 0 value is different than a NULL/missing value. Awards with a hardcoded 0 value for FOA/NOA HEAL language should not be engaged. Awards with a NULL/missing value should be engaged.*/
 replace do_not_engage=1 if nih_aian=="1"
-replace do_not_engage=1 if res_net=="MEDTECH" & strpos(lower(proj_title), "seedling")>0 
+replace do_not_engage=1 if res_net=="MEDTECH" & ustrpos(proj_title, "Seedling")>0 
 label var do_not_engage "Do not engage"
 
 * Checklist exempt *;
@@ -62,6 +62,7 @@ save "$temp/pm_flags.dta", replace
 
 use "$der/study_lookup_table.dta", clear
 sort appl_id
+replace appl_id=strtrim(appl_id)
 merge m:1 appl_id using "$temp/pm_flags.dta"
 drop if _merge==2
 drop _merge
@@ -73,11 +74,13 @@ foreach var in do_not_engage checklist_exempt_all {
 	copydesc `var' z`var'
 	drop `var' 
 	rename z`var' `var'
+	replace `var'=0 if `var'==.
 	}
 
 * Output *;
 keep appl_id do_not_engage checklist_exempt_all
 duplicates drop
 sort appl_id
+duplicates list appl_id /* Note: appl_id must be unique in this table */
 save "$der/engagement_flags.dta", replace
-export delimited using "$der/engagement_flags.csv", nolab quote replace /*n=2627 note the final table includes reporter_dqaudit appl_ids*/
+export delimited using "$der/engagement_flags.csv", nolab quote replace /*n=2631 note the final table includes reporter_dqaudit appl_ids*/

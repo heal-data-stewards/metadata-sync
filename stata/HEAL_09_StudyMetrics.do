@@ -26,6 +26,7 @@
 /*		  previous program HEAL_6Mo_Report.do; the latter has been archived.		*/
 /*																					*/
 /* Version changes																	*/
+/*		- 2026/03/30 - added filtering for new compliance metrics					*/
 /*		- 2025/12/11 - added count of how many studies selected each repo (#9)		*/
 /*		- 2025/06/16 - categories from Data Dictionary Tracker monday board changed */
 /*		- 2025/04/25 - Met w/ Kathy and Hina and removed conditional exclusion of	*/
@@ -42,6 +43,8 @@
 
 clear
 
+
+/* ----- PLATFORM METRICS -----*/
 
 
 /* ----- 0. Prepare standard dataset for metrics report ----- */
@@ -317,3 +320,21 @@ merge 1:1 appl_id using "$raw/research_networks_$today.dta"
 replace entity_type="CTN Protocol" if res_net=="CTN"
 asdoc tab entity_type, title(appl_ids by entity type) save($qc/StudyMetrics_$today.doc) append label
 asdoc, text(This tabulation shows the number of awards belonging to each type of entity. Here, the number for CTN Protocol indicates the total number of appl_ids associated with any CTN Protocol numbers. The 'Other' entity type indicates 6 awards that do not have project serial numbers and appear to be contracts or other agreements - these 6 are listed out in the regular QC Report. Every other appl_id in the MySQL DB belongs to a Study, where 'study' is defined by the Stewards.) save($qc/StudyMetrics_$today.doc) append label
+
+
+
+
+
+
+/* ----- COMPLIANCE METRICS -----*/
+
+
+/* ----- 0. Prepare standard dataset for metrics report ----- */
+use "$der/mysql_$today.dta", clear
+drop if merge_awards_mds==1 /* keep only records that appear in Platform MDS */
+drop if archived=="archived" /* drop archived Platform records */
+keep if inlist(entity_type,"Study","CTN") /*drop "other" entities. Note that merge_awards_mds==1 drop step above results in all reporter/awards table appl_ids related to CTN Protocols being dropped */
+/* merge in study_lookup_table to get if that HDP ID was ever related to a heal-funded appl. this works for studies. CTN protocols on Platform should be set to heal_funded=Yes */
+
+
+save "$temp/compliancemetrics_$today.dta", replace

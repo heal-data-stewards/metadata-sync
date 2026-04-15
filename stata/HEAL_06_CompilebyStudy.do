@@ -9,52 +9,53 @@
 /*	the study_lookup_table, producing a large compiled dataset that provides key	*/
 /*	values by study. 																*/
 /*		1. Merge source data 														*/
-/*		2. Derive study-level values for data that exists at appl_id level in the raw. */
+/*		2. Derive study-level values for data that exists at appl_id level  		*/
 /*		3. Merge derived study-level values 										*/
 /*																					*/
 /* Notes:  																			*/
-/*	-The output dataset is analogous, but not identical, to the HEAL Studies Board  */
-/*		prepared by Hina Shah and output to monday.com.								*/
+/*	-The output dataset is analogous, but not identical, to the data extract that is*/
+/*		prepared by Hina Shah for upload to monday.com HEAL Studies Board.			*/
 /*																					*/
 /* -------------------------------------------------------------------------------- */
 
-clear all 
+clear 
 
 
 
 /* ----- 1. Merge source data ----- */
 
-* -- Stack reporter_dqaudit rows with reporter table data already merged with awards & progress_tracker -- *;
-use "$der/mysql_$today.dta", clear /*n=2516*/
-append using "$der/reporter_dqaudit.dta" /*n=3005*/
+* -- Stack reporter_dqaudit rows with the merged reporter, awards, progress_tracker & research_networks dataset -- *;
+use "$der/mysql_$today.dta", clear /*n=2521*/
+append using "$der/reporter_dqaudit.dta", force /*n=3010*/
 sort appl_id
 order appl_id
-drop if appl_id==""
+drop if appl_id=="" /*Note: consider which records are dropped by this, and if we want them to be dropped*/
 drop compound_key
 sort appl_id hdp_id
 egen compound_key=concat(appl_id hdp_id), punct(_)
-save "$temp/xalldata_$today.dta", replace /*n=2953*/
+save "$temp/xalldata_$today.dta", replace /*n=2957*/
 
 
 * -- Merge data from other tables to study_lookup_table -- *;
-use "$der/study_lookup_table.dta", clear /*n=2661*/
+use "$der/study_lookup_table.dta", clear /*n=2683*/
 sort compound_key
 merge m:1 compound_key using "$temp/xalldata_$today.dta"
-drop if _merge==2 /* n=304 dropped; these are non-study entities (CTN protocols or Others)*/
+/* tab entity_type if _merge==2 */
+drop if _merge==2 /* n=305 dropped; these are all non-study entities (CTN protocols or Others)*/
 drop _merge 
 
-replace res_net=upper(res_net)
-
+* Engagement flags *;
 merge m:1 appl_id using "$der/engagement_flags.dta", keepusing(do_not_engage checklist_exempt_all)
 drop if _merge==2
 drop _merge
 
+* PI Emails *;
 merge m:1 appl_id using "$raw/pi_emails_$today.dta", keepusing(pi_email)
 drop if _merge==2
 drop _merge
 
 sort xstudy_id
-save "$temp/gtd_targets_$today.dta", replace /*n=2660*/
+save "$temp/alldata_$today.dta", replace /*n=2683*/
 
 
 
@@ -62,7 +63,7 @@ save "$temp/gtd_targets_$today.dta", replace /*n=2660*/
 
 * -- PI emails -- *;
 *Apply the latest non-missing pi_email for the study to rows where pi_email is missing *;
-use "$temp/gtd_targets_$today.dta", clear
+use "$temp/alldata_$today.dta", clear
 keep if pi_email!=""
 gen study_pi_email=""
 	
@@ -93,7 +94,7 @@ save "$temp/pi_emails_key.dta", replace
 
 * -- Research Network -- *;
 * Apply the non-missing res_net for the study to rows where res_net is missing *;
-use "$temp/gtd_targets_$today.dta", clear
+use "$temp/alldata_$today.dta", clear
 keep if res_net!=""
 keep xstudy_id res_net
 sort xstudy_id res_net
@@ -120,7 +121,7 @@ save "$temp/livearchkey.dta", replace
 
 
 /* ----- 3. Merge derived study-level values ----- */
-use "$temp/gtd_targets_$today.dta", clear
+use "$temp/alldata_$today.dta", clear
 merge m:1 xstudy_id using "$temp/pi_emails_key.dta", keepusing(study_pi_email)
 drop _merge
 
@@ -138,4 +139,6 @@ rename project_title project_title_platform
 
 order study_hdp_status, after(study_hdp_id)
 sort xstudy_id fisc_yr
-save "$out/GTD_Targets/gtd_targets_$today.dta", replace
+save "$der/alldata_$today.dta", replace
+
+export delimited using "$der/alldata_$today.csv", nolab quote replace

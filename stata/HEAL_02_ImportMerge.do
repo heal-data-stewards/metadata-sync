@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------------- */
 /* Project: HEAL 																	*/
-/* PI: Kira Bradford, Becky Boyles													*/
+/* PI: Kira Bradford																*/
 /* Program: HEAL_01_ImportMerge														*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/02/29															*/
@@ -9,7 +9,7 @@
 /*  cleans it.																		*/
 /*		1. Import data																*/
 /*		2. Clean progress_tracker data												*/
-/*		3. Clean awards data														*/
+/*		3. Clean awards table data													*/
 /*		4. Merge data 																*/
 /*		5. Clean merged data														*/
 /*																					*/
@@ -18,13 +18,14 @@
 /*		  be run before any other Stata HEAL programs.								*/	
 /*		- Both project_num and appl_id fields in MDS are populated with the CTN 	*/
 /*		  protocol number if the HDP_ID is for a CTN protocol						*/
+/*		- progress_tracker only includes records hosted on Platform's MDS. Records	*/
+/*		  hosted somewhere else, such as PDAPS or the AggMDA, are not included.		*/
 /*																					*/
 /* Version changes																	*/
 /*		- 2025/09/02 Platform now contains some records that do not match any NIH	*/
 /*		  appl_id or NIH study.	These were originally in the AggMDS system, but have*/
 /*		  moved to Platform MDS. They are often links to repository data deposits. 	*/
-/*		  They have appl_id="0" and get dropped because they have nothing to do with*/
-/*		  Stewards engagement.														*/
+/*		  They have appl_id="0".													*/
 /*		- 2024/04/29 The reporter table may contain records for appl_ids not present*/
 /*		  in the awards table. This occurs when Platform adds a record for a study	*/
 /*		  that isn't HEAL-funded, but is related to HEAL-funded work ("HEAL-adjacent*/
@@ -56,45 +57,33 @@ save "$raw/`dtaset'.dta", replace
 
 /* ----- 2. Clean progress_tracker data ----- */
 
-use "$raw/progress_tracker_$today.dta", clear /*n=1672*/ 
+use "$raw/progress_tracker_$today.dta", clear /*n=1691*/ 
 order appl_id 
 drop if appl_id==""
+
+* Identify and flag bad values of project_num*;
+gen mds_flag_bad_projnum=0
 
 * -- CTN Protocols -- *;
 gen mds_ctn_flag=regexm(project_num,"^CTN") 
 gen mds_ctn_number=project_num if mds_ctn_flag==1
-replace project_num="" if mds_ctn_flag==1 /*n=44*/ /* Remove CTN values from appl_id and project_num fields */
+replace project_num="" if mds_ctn_flag==1 /*n=46*/ /* Remove CTN values from appl_id and project_num fields */
 replace appl_id="" if mds_ctn_flag==1 /* Note: these appl_ids all equal 0 in MDS data */
 
-* -- Project numbers -- *;
-* Split project_num into components needed for xstudy_id *;
-foreach var in project_num {
-	gen x`var'=`var'
-	egen sieved`var'=sieve(`var') , char(-)
-	gen num_dashes=length(strtrim(sieved`var'))
-	}
-replace xproject_num="" if num_dashes>1 /*n=6 changes made*/ 
-	
-	* Identify and flag bad values of project_num*;
-	gen mds_flag_bad_projnum=1 if num_dashes>1 /*n=6 changes made*/
+* -- Other entities -- *;
+* Identified by a value in project_num that doesn't follow the format of NIH project numbers *;
+
+	* Too many dashes in project_num *;
+	foreach var in project_num {
+		egen sieved`var'=sieve(`var') , char(-)
+		gen num_dashes=length(strtrim(sieved`var'))
+		}
+	replace mds_flag_bad_projnum=1 if num_dashes>1 /*n=6 changes made*/
 	gen mds_bad_projnum=project_num if num_dashes>1 /*n=6 changes made*/
-	
-	/* ARCHIVED - Platform fixed source data errors 
-	* If an underscore was inserted, remove it and everything that follows it *;
-	foreach var of varlist xproject_num {
-	   replace `var'=regexr(`var', "\_.*", "") 
-	   }
-	*/
-gen proj_num_spl_ty_code=substr(xproject_num,1,1)
-gen proj_num_spl_act_code=substr(xproject_num,2,3)
-gen proj_ser_num=substr(xproject_num,5,8)
-	split xproject_num, p(-)
-	drop xproject_num1
-	rename xproject_num2 proj_nm_spl_supp_yr
-gen proj_num_spl_sfx_code=substr(proj_nm_spl_supp_yr,3,.)
-foreach var in proj_num_spl_ty_code proj_num_spl_act_code proj_ser_num proj_nm_spl_supp_yr proj_num_spl_sfx_code {
-	rename `var' mds_`var'
-	}
+	drop sievedproject_num num_dashes
+
+	* ICPSR data deposits *;
+	replace mds_flag_bad_projnum=1 if substr(project_num,1,5)=="ICPSR" /*n=5 changes made*/
 	
 * Count number of hdp_ids for a given appl_id *;
 sort appl_id hdp_id
@@ -102,60 +91,62 @@ by appl_id: egen num_hdp_by_appl=count(hdp_id)
 replace num_hdp_by_appl=0 if num_hdp_by_appl==. /*n=0 changes made */
 replace num_hdp_by_appl=0 if appl_id=="0" 
 replace num_hdp_by_appl=. if appl_id==""
-	/*Note: 2025/11/10: there are 41 appl_ids that have >1 HDP_ID associated, and the max number of HDP_IDs associated is 7. */
+	/*Note: 2026/03/23: there are 37 appl_ids that have >1 HDP_ID associated, and the max number of HDP_IDs associated is 6. */
 
 * Entity type *;
 gen entity_type="Study"
 replace entity_type="CTN" if mds_ctn_flag==1
 replace entity_type="Other" if mds_flag_bad_projnum==1
-replace entity_type="Other" if appl_id=="0" /*Non-NIH studies on Platform */
+replace entity_type="Other" if appl_id=="0" & mds_ctn_flag!=1 /* Only records belonging to a Study entity should go in the study_lookup_table. Records without an appl_id must be CTN or Other entities. */
 
 * -- Non-NIH studies on Platform -- *;
 replace appl_id="" if appl_id=="0" /*n=7*/
 
-
-* Save prepped data *;
-drop sievedproject_num num_dashes xproject_num
 save "$temp/progress_tracker_$today.dta", replace
 
 
 
 
 /* ----- 3. Clean awards table data ----- */
-* Correct nih_foa_heal_lang & nih_noa_heal_lang to null *;
+* Note: This step may not be needed if the awards table is not altered during export from MySQL. Sabrina had issues of NULL/missing values being set to 0 during export. As a quick check, note that the value of nih_foa_heal_lang and of nih_noa_heal_lang should be NULL in a majority of records, since NIH has only indicated values of these variables in the 2024 and 2025 new awards lists. *;
 use "$raw/awards_$today.dta", clear
+drop if appl_id==""
 foreach acr in foa noa {
+	replace nih_`acr'_heal_lang="NULL" if nih_`acr'_heal_lang==""
 	rename nih_`acr'_heal_lang xnih_`acr'_heal_lang
 	} 
 sort appl_id
 merge 1:1 appl_id using "$doc/correct_foanoa_values.dta", keepusing(nih_foa_heal_lang nih_noa_heal_lang)
 drop if _merge==2
 drop _merge x*
+foreach acr in foa noa {
+	replace nih_`acr'_heal_lang="NULL" if nih_`acr'_heal_lang==""
+	}
 order nih_noa_notes, last
-save "$temp/awards_$today.dta", replace /*n=2439*/
+save "$temp/awards_$today.dta", replace /*n=2442*/
 
 	
 
 
 /* ----- 4. Merge data ----- */
 * Merge awards reporter *;
-use "$raw/reporter_$today.dta", clear /*n=2439*/
+use "$raw/reporter_$today.dta", clear /*n=2442*/
 drop if appl_id==""
-merge 1:1 appl_id using "$temp/awards_$today.dta" /*n=2439*/
+merge 1:1 appl_id using "$temp/awards_$today.dta" /*n=2442*/
 drop if appl_id==""
 rename _merge merge_reporter_awards
 label define awrep 1 "In reporter only" 2 "In awards only" 3 "In both tables"
 label values merge_reporter_awards awrep
-save "$temp/nihtables_$today.dta", replace /*n=2439*/
+save "$temp/nihtables_$today.dta", replace /*n=2442*/
 
-* Merge MDS data (via progress_tracker) *;
+* Merge progress_tracker table *;
 use "$temp/nihtables_$today.dta", clear
 merge 1:m appl_id using "$temp/progress_tracker_$today.dta" 
 rename _merge merge_awards_mds
 label var merge_awards_mds "Merge of MySQL and MDS"
 label define sqlmds 1 "In MySQL only" 2 "In MDS only" 3 "In both databases"
 label values merge_awards_mds sqlmds
-save "$temp/dataset_$today.dta", replace /*n=2514*/
+save "$temp/dataset_$today.dta", replace /*n=2521*/
 
 * Merge research_networks table *;
 use "$temp/dataset_$today.dta", clear
@@ -163,7 +154,7 @@ merge m:1 appl_id using "$raw/research_networks_$today.dta"
 drop if _merge==2
 drop _merge res_net_override_flag
 replace res_net=upper(res_net)
-replace entity_type="CTN" if res_net=="CTN" /*n=219*/
+replace entity_type="CTN" if res_net=="CTN" /*n=219 changes made*/
 replace entity_type="Study" if entity_type==""
 save "$temp/dataset2_$today.dta", replace
 
@@ -173,18 +164,9 @@ save "$temp/dataset2_$today.dta", replace
 /* ----- 5. Clean merged data ----- */
 use "$temp/dataset2_$today.dta", clear 
 
-* Update values of variables used for identifiers *;
-foreach var in proj_ser_num proj_num_spl_sfx_code {
-	replace `var'=mds_`var' if strtrim(`var')==""
-	}
-	/* Note: subproj_id is not available in the MDS data */ /*n=9 and n=6 real changes made*/
-	
-	replace proj_ser_num=mds_proj_ser_num if strtrim(proj_ser_num)==""
-
 * Flag supplement awards *;
 gen xsupp_flag=substr(proj_num,-2,1)
-gen supplement_flag=1 if xsupp_flag=="S"
-tab supplement_flag /*n=620*/
+gen supplement_flag=1 if xsupp_flag=="S" /*n=622 supplements*/
 drop xsupp_flag	
 
 * Dates *;
@@ -202,7 +184,7 @@ foreach var in awd_not_date bgt_end bgt_strt proj_end_date proj_strt_date {
 sort appl_id hdp_id
 egen compound_key=concat(appl_id hdp_id), punct(_)
 
-save "$der/mysql_$today.dta", replace /*n=2516*/	
+save "$der/mysql_$today.dta", replace /*n=2521*/	
 	
 
 	

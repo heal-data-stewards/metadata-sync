@@ -12,7 +12,9 @@
 /*		1. Import documentation tables												*/
 /*																					*/
 /* Notes:  																			*/
-/*		- 2026/01/13 made this first program in the tree							*/
+/*	This program simply formats the tabs in the Excel downloaded from Google Drive  */
+/*  into separate .csv files so they can be read into MySQL.						*/
+/*		- 2026/01/13 made this the first program in the tree						*/
 /*		- 2025/01/24 this program contains a subset of code from the retired 		*/
 /*	 	  HEAL_02_ResNetTable.do that creates .csv versions of the documentation	*/
 /*		  tables to read into MySQL.												*/
@@ -37,11 +39,5 @@ foreach tab in ref_table value_overrides_byappl {
 	save "$temp/`tab'.dta", replace
 	export delimited using "$doc/res_net_`tab'.csv", quote replace
 	}
-
-
 	
-/* Manual step: read output of step 1 into MySQL, then export research_networks table for read-in in program 01 */
-
-
-use "$temp/ref_table.dta", clear
-gen lng_rp=length(res_prg)
+/* Manual step: Run the SQL script file "create_res_net_doc_tables". Then run the SQL script file "update_research_networks." Then export research_networks table from MySQL as a .csv so it can be read in in program 02. */

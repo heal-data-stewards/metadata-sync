@@ -115,7 +115,6 @@ replace in_mysql=0 if in_mysql==.
 gen proj_num_spl_sfx_code_rdct=proj_num_spl_sfx_code
 replace proj_num_spl_sfx_code_rdct=regexr(proj_num_spl_sfx_code_rdct,"^A\d+","")
 
-* To-do: Maria to confirm these are correct lists of activity codes that denote phase 1 and phase 2 *;
 gen phase=.
 replace phase=1 if inlist(act_code,"R61","UG3","K99","F99","R43","R41","U43")
 replace phase=2 if inlist(act_code,"R33","UH3","R00","R44","R42","U44")
@@ -155,7 +154,7 @@ duplicates drop
 by xstudy_id_stewards: egen num_appl_by_xstudyidstewards=count(appl_id)
 keep xstudy_id_stewards num_appl_by_xstudyidstewards
 duplicates drop
-save "$temp/sis_count.dta", replace
+save "$temp/sis_count.dta", replace /*n=1650*/
 
 * Count # of hdp_ids for each xstudy_id_stewards *;
 use "$temp/mysql_$today.dta", clear
@@ -169,7 +168,7 @@ by xstudy_id_stewards: egen num_live_hdps=total(xlive)
 by xstudy_id_stewards: egen num_arch_hdps=total(xarch)
 keep xstudy_id_stewards num_hdp_by_xstudyidstewards num_live_hdps num_arch_hdps
 duplicates drop 
-save "$temp/hdpid_count.dta", replace
+save "$temp/hdpid_count.dta", replace /*n=1650*/
 
 
 * Merge in count vars
@@ -374,7 +373,7 @@ save "$temp/xstudyidgood5.dta", replace /*n=143*/
 	keep if num_appl_pairs==1
 	replace study_id=zstudy_id
 	keep study_id appl_id hdp_id compound_key xstudy_id_stewards 
-	save "$temp/xstudyidgood5b.dta", replace /*n=10 ; note that appl_ids are duplicated here*/
+	save "$temp/xstudyidgood5b.dta", replace /*n=16 ; note that appl_ids are duplicated here*/
 
 	* 5c. Matches - only one live HDP ID among possible matches *;
 	use "$temp/xstudyidgood5.dta", clear

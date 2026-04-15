@@ -4,19 +4,20 @@
 /* Program: HEAL_00_Master															*/
 /* Programmer: Sabrina McCutchan (CDMS)												*/
 /* Date Created: 2024/02/29															*/
-/* Date Last Updated: 2026/01/16													*/
+/* Date Last Updated: 2026/04/10													*/
 /* Description:	This is the master Stata program for MySQL data processing. It sets	*/
 /* global macros before calling the following programs:								*/
 /*		1. Generate Research Networks Documentation Tables							*/
-/*		2. Import & merge data														*/
-/*		3. Generate Study Table														*/
-/*		4. Generate CTN crosswalk and outputs										*/
+/*		2. Import latest MySQL data													*/
+/*		3. Perform data quality audit on Reporter and generate reporter_dqaudit table*/
+/*		4. Generate study_lookup_table												*/
 /*		5. Generate engagement_flags table											*/
-/*		6. Generate Get the Data target lists										*/
-/*		97. Perform data quality audit on Reporter									*/
-/*		98. Generate study metrics report											*/
-/*		99. Generate QC report														*/
+/*		6. Compile data tables by study												*/
+/*		7. Generate QC report														*/
+/*		8. Generate Get the Data target lists										*/
+/*		9. Generate study metrics report											*/
 /*																					*/
+/*		96.[Archived] Generate CTN crosswalk and outputs							*/
 /*		X. [Archived] Generate Research Networks Table								*/
 /*		X. Scratch																	*/
 /*		X. Manage archiving of MySQL tables											*/
@@ -39,8 +40,8 @@ clear all
 * Today's date *;
 local xt: display %td_CCYY_NN_DD date(c(current_date), "DMY")
 local today = subinstr(trim("`xt'"), " " , "-", .)
-global today "`today'"
-/*global today "2026-02-12"*/
+/*global today "`today'"*/
+global today "2026-04-10"
 
 /* ----- 2. Filepaths ----- */
 
@@ -60,6 +61,7 @@ global nih $dir\NIH_Data
 /* ----- 3. Variables ----- */
 * Variables used to identify studies *;
 global stewards_id_vars proj_ser_num subproj_id proj_num_spl_sfx_code
+	* Note: change the variables included in stewards_id_vars whenever the study ID creation rules for creating groupings change *; 
 global key_vars study_id xstudy_id_stewards appl_id hdp_id archived num_appl_by_xstudyidstewards num_hdp_by_appl num_hdp_by_xstudyidstewards
 
 
@@ -82,10 +84,10 @@ do "$prog/HEAL_02_ImportMerge.do"
 /* ----- 3. Perform data quality audit on Reporter ----- */
 do "$prog/HEAL_03_DQAudit.do"
 
-/* ----- 4. Generate Study Table ----- */
+/* ----- 4. Generate study_lookup_table ----- */
 do "$prog/HEAL_04_StudyTable.do"
 
-/* ----- 5. Generate Engagement table ----- */
+/* ----- 5. Generate engagement_flags table ----- */
 do "$prog/HEAL_05_EngagementTable.do"
 
 /* ----- 6. Compile data tables by study ----- */
@@ -106,20 +108,15 @@ do "$prog/HEAL_09_StudyMetrics.do"
 
 
 
-/* ----- OTHER PROGRAMS -----*/
-
-/* ----- 96. Generate CTN crosswalk and outputs ----- */
-do "$prog/HEAL_96_CTN.do"
-
-
-
-
-
 
 
 
 
 /* ----- ARCHIVED PROGRAMS -----*/
+
+/* ----- 96. Generate CTN crosswalk and outputs ----- */
+do "$prog/HEAL_96_CTN.do"
+
 /* ----- Generate Research Networks Table ----- */
 do "$prog/xHEAL_02_ResNetTable.do"
 
