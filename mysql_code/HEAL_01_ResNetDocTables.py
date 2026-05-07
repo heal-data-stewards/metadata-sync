@@ -62,7 +62,7 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "2026-04-28"
+today = "2026-04-24"
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
 
@@ -125,6 +125,8 @@ for tab in tabs:
     df.to_csv(os.path.join(doc, f'res_net_{tab}.csv'), index=False, quoting=1)
 
     print(f"Processed: {tab}")
+
+
 
 
 

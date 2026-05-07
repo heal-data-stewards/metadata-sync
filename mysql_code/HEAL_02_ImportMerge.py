@@ -63,7 +63,7 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "2026-04-28"
+today = "2026-04-24"
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
 
@@ -111,7 +111,7 @@ for name in datasets:
     # df = pd.read_csv(csv_file, dtype=str)
     df = pd.read_csv(
     csv_file,
-    sep=';',                # Semicolon delimiter
+    # sep=';',                # Semicolon delimiter
     engine='python',        # Use Python engine for complex parsing
     # quoting=3,              # QUOTE_NONE, avoids treating quotes specially
     encoding='cp1252',
@@ -148,21 +148,21 @@ log_out(f"Import MySQL Awards table: {str(df_awards_00.shape)}")
 log_out(f"Import MySQL Progress Tracker table: {str(df_prog_trkr_00.shape)}")
 
 # Write MySQL Tables to Worksheets
-wb_dataflow = f"{out}/Dataflow_{today}.xlsx"
+# wb_dataflow = f"{out}/Dataflow_{today}.xlsx"
 
 # Use ExcelWriter in append mode ('a')
 # Pandas will automatically handle loading the existing workbook
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-    # 3. Write your DataFrame directly
-    df_awards_00.to_excel(writer, sheet_name='MySQL_Awards', index=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#     # 3. Write your DataFrame directly
+#     df_awards_00.to_excel(writer, sheet_name='MySQL_Awards', index=False)
     
-df_reporter_00_noabs=df_reporter_00.drop(columns=['proj_abs'], inplace=False)
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-    # 3. Write your DataFrame directly
-    df_reporter_00_noabs.to_excel(writer, sheet_name='MySQL_Reporter', index=False)
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-    # 3. Write your DataFrame directly
-    df_prog_trkr_00.to_excel(writer, sheet_name='MySQL_Prog_Tracker', index=False)
+# df_reporter_00_noabs=df_reporter_00.drop(columns=['proj_abs'], inplace=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#     # 3. Write your DataFrame directly
+#     df_reporter_00_noabs.to_excel(writer, sheet_name='MySQL_Reporter', index=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#     # 3. Write your DataFrame directly
+#     df_prog_trkr_00.to_excel(writer, sheet_name='MySQL_Prog_Tracker', index=False)
 
 
 # 2. Prepare progress_tracker to merge ----- */
@@ -335,9 +335,9 @@ print(f"Saved prepped data to {output_file}")
 
 print("df_prog_trkr_05: " + str(df_prog_trkr_05.shape))
 log_out(f"df_prog_trkr_05: Drops helper vars and saves to 'progress_tracker_today.csv' {df_prog_trkr_05.shape}")
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-    # 3. Write your DataFrame directly
-    df_prog_trkr_05.to_excel(writer, sheet_name='progress_tracker_today', index=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#     # 3. Write your DataFrame directly
+#     df_prog_trkr_05.to_excel(writer, sheet_name='progress_tracker_today', index=False)
 
 # /* ----- 3. Merge data ----- */
 # * Merge awards reporter *;
@@ -424,9 +424,10 @@ print("df_nihtables_00: " + str(df_nihtables_00.shape))
 
 df_nihtables_noabs=df_nihtables_00.drop(columns=['proj_abs'], inplace=False)
 
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-    # 3. Write your DataFrame directly
-    df_nihtables_noabs.to_excel(writer, sheet_name='nihtables_today', index=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#     # 3. Write your DataFrame directly
+#     df_nihtables_noabs.to_excel(writer, sheet_name='nihtables_today', index=False)
+
 
 
 # * Merge MDS data (via progress_tracker) *;
@@ -483,9 +484,9 @@ print("df_dataset_00: " + str(df_dataset_00.shape))
 
 df_dataset_00_noabs=df_dataset_00.drop(columns=['proj_abs'], inplace=False)
 
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-    # 3. Write your DataFrame directly
-    df_dataset_00_noabs.to_excel(writer, sheet_name='dataset_today', index=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#     # 3. Write your DataFrame directly
+#     df_dataset_00_noabs.to_excel(writer, sheet_name='dataset_today', index=False)
 
 
 
@@ -613,22 +614,22 @@ mysql_today_noabs = mysql_today_noabs[cols_to_front + [col for col in mysql_toda
 
 log_out(f"mysql_today_noabs: Copy of mysql_today, but without proj_abs field b/c of export issues with special char' {mysql_today_noabs.shape}")
 
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-     # 2. Map the column to labels before writing
-    # This replaces the values in 'merge_awards_mds' for the output only
-    mysql_today_noabs['merge_awards_mds'] = mysql_today_noabs['merge_awards_mds'].map(indicator_map).fillna(mysql_today_noabs['merge_awards_mds'])
-    # 3. Write your DataFrame directly
-    mysql_today_noabs.to_excel(writer, sheet_name='mysql_today', index=False)
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+#      # 2. Map the column to labels before writing
+#     # This replaces the values in 'merge_awards_mds' for the output only
+#     mysql_today_noabs['merge_awards_mds'] = mysql_today_noabs['merge_awards_mds'].map(indicator_map).fillna(mysql_today_noabs['merge_awards_mds'])
+#     # 3. Write your DataFrame directly
+#     mysql_today_noabs.to_excel(writer, sheet_name='mysql_today', index=False)
 
-# Deletes "Sheet1"
-# Open the file in append mode
-with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-    # Access the openpyxl workbook object
-    workbook = writer.book
+# # Deletes "Sheet1"
+# # Open the file in append mode
+# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+#     # Access the openpyxl workbook object
+#     workbook = writer.book
     
-    # Check if the sheet exists and delete it
-    if 'Sheet1' in workbook.sheetnames:
-        del workbook['Sheet1']
+#     # Check if the sheet exists and delete it
+#     if 'Sheet1' in workbook.sheetnames:
+#         del workbook['Sheet1']
 
 
 # END HEAL_02_ImportMerge 
