@@ -9,11 +9,13 @@ flowchart TD
     classDef file    fill:#e8f5e9,color:#333,stroke:#5a9e5a
     classDef ext     fill:#fff8e1,color:#333,stroke:#c89500
     classDef mysql   fill:#e3f2fd,color:#333,stroke:#1e88e5
+    classDef mysqlup fill:#e8eaf6,color:#333,stroke:#5c6bc0
     classDef out     fill:#fce4e4,color:#333,stroke:#c0392b
 
-    %% ── External / Manual Inputs ─────────────────────────────────────────────
+    %% ── Non-MySQL Input Files ─────────────────────────────────────────────────
+    %% Files that enter the pipeline from outside MySQL (curator files, API exports, etc.)
 
-    subgraph Ext["Manual / External Inputs"]
+    subgraph NonMySQL["Non-MySQL Input Files"]
         direction TB
         ResNetXLS["HEAL_research_networks_ref_table_for_MySQL.xlsx\n(curator-maintained)"]:::ext
         NIH_API["NIH Reporter API\n(manual export CSV)"]:::ext
@@ -22,15 +24,26 @@ flowchart TD
         FOA_NOA["correct_foanoa_values.dta\n(NIH award emails FY24/25)"]:::ext
     end
 
-    %% ── MySQL Raw Exports ────────────────────────────────────────────────────
+    %% ── MySQL Data (original exports) ────────────────────────────────────────
+    %% Raw exports from MySQL before any Stata-triggered updates.
+    %% These must be current before running the pipeline.
 
-    subgraph MySQLExp["MySQL Exports  (date-stamped CSVs / DTAs, $raw/)"]
+    subgraph MySQLOrig["MySQL Data  (original exports, $raw/)"]
         direction TB
         m_rep["reporter_$today.csv"]:::mysql
         m_awd["awards_$today.csv"]:::mysql
         m_pt["progress_tracker_$today.csv"]:::mysql
-        m_rn["research_networks_$today.csv"]:::mysql
         m_pi["pi_emails_$today.csv"]:::mysql
+    end
+
+    %% ── Updated MySQL Data ───────────────────────────────────────────────────
+    %% MySQL exports that are only valid AFTER Stata (S01) has written
+    %% res_net_ref_table.csv and the manual SQL import has been run.
+    %% Scripts that use these files must wait for that manual step.
+
+    subgraph MySQLUpdated["Updated MySQL Data  (after S01 + manual SQL, $raw/)"]
+        direction TB
+        m_rn["research_networks_$today.csv"]:::mysqlup
     end
 
     %% ── Scripts ──────────────────────────────────────────────────────────────
@@ -50,7 +63,7 @@ flowchart TD
     %% ── Intermediate Files ───────────────────────────────────────────────────
 
     res_net_csv["res_net_ref_table.csv\nres_net_value_overrides_byappl.csv\n($doc/)"]:::file
-    rn_mysql[/"MySQL: research_networks table\n(after manual SQL import + export)"/]:::mysql
+    rn_mysql[/"MySQL: research_networks table\n(manual SQL import + update_research_networks)"/]:::mysql
 
     nihtables["nihtables_$today.dta\n(reporter ⋈ awards, $temp/)"]:::file
     mysql_dta["mysql_$today.dta\n(fully merged & cleaned, $der/)"]:::file
@@ -70,27 +83,27 @@ flowchart TD
 
     %% ── Data Flow ────────────────────────────────────────────────────────────
 
-    %% 01 → research networks
-    ResNetXLS  --> S01
-    S01        --> res_net_csv
+    %% 01 → writes res_net CSVs → manual SQL updates MySQL → export m_rn
+    ResNetXLS   --> S01
+    S01         --> res_net_csv
     res_net_csv -->|"manual SQL:\ncreate_res_net_doc_tables\n+ update_research_networks"| rn_mysql
-    rn_mysql   -->|"export → research_networks_$today.csv"| m_rn
+    rn_mysql    -->|"export → research_networks_$today.csv"| m_rn
 
-    %% 02 → merged tables
-    S_vl   -.->|"value labels (used by all)"| S02
-    m_rep  --> S02
-    m_awd  --> S02
-    m_pt   --> S02
-    m_rn   --> S02
-    m_pi   --> S02
+    %% 02 → merged tables (reads from both MySQL blocks)
+    S_vl    -.->|"value labels (used by all)"| S02
+    m_rep   --> S02
+    m_awd   --> S02
+    m_pt    --> S02
+    m_rn    --> S02
+    m_pi    --> S02
     FOA_NOA --> S02
     S02 --> nihtables
     S02 --> mysql_dta
 
     %% 03 → DQ audit
-    nihtables  --> S03
-    NIH_API    --> S03
-    S03        --> dqaudit
+    nihtables --> S03
+    NIH_API   --> S03
+    S03       --> dqaudit
 
     %% 04 → study lookup table
     mysql_dta    --> S04
@@ -98,20 +111,20 @@ flowchart TD
     StudyMatches --> S04
     S04          --> slt
 
-    %% 05 → engagement flags
+    %% 05 → engagement flags (reads updated m_rn)
     nihtables --> S05
     m_rn      --> S05
     slt       --> S05
     S05       --> eng_flags
 
     %% 06 → alldata (compiled by study)
-    mysql_dta  --> S06
-    dqaudit    --> S06
-    slt        --> S06
-    eng_flags  --> S06
-    m_pi       --> S06
-    m_pt       --> S06
-    S06        --> alldata
+    mysql_dta --> S06
+    dqaudit   --> S06
+    slt       --> S06
+    eng_flags --> S06
+    m_pi      --> S06
+    m_pt      --> S06
+    S06       --> alldata
 
     %% 07 → QC report
     m_pt      --> S07
