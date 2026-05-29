@@ -39,8 +39,6 @@
 # /*																					*/
 # /* -------------------------------------------------------------------------------- */
 
-# CURRENTLY IMPORTS CSV files exported from MySQL Heal Studies database
-# Requires these _today.csv files to exist:
 
 # ----- Boiler Plate Code -----------------------------------------------------*/
 
@@ -65,25 +63,20 @@ today = "2026-04-24"
 print(today)
 
 # ----- 2. Filepaths ----- */
-# dir = Path(r"/rtpnfil03/rtpnfil03_vol4/NPTB2/EDC/Migrated/HEAL") #UNIX
-dir = Path(r"\\rtpnfil03\NPTB2\EDC\Migrated\HEAL") #WINDOwS
-raw = dir / "Extracts"
-der = dir / "Derived"
-prog = dir / "Programs"
-doc = dir / "Documentation"
-temp = dir / "temp"
+dir = Path(r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL") #WINDOwS
+inp = dir / "Input"
 out = dir / "Output"
-qc = out / "QC"
-backups = dir / "Backups"
+log = dir / "Log"
+templ = dir / "Template"
 
 # Logging
-log_path = os.path.join(out, f"HEAL_09_StudyMetrics_{today}_log.txt")
+log_path = os.path.join(log, f"HEAL_09_StudyMetrics_{today}_log.txt")
 with open(log_path, 'w') as f:
     pass  # 'w' mode truncates existing file or creates new blank file
 # open(f"{out}/StudyMetrics_{today}_log.txt", 'w').close() #Clears Log before running
 
 def log_out(message):
-    with open(f"{out}/HEAL_09_StudyMetrics_{today}_log.txt", 'a') as f:
+    with open(f"{log}/HEAL_09_StudyMetrics_{today}_log.txt", 'a') as f:
         print(message, file=f)
 
 log_out(f"HEAL_09_StudyMetrics Log Run Date: {today}")
@@ -101,22 +94,21 @@ log_out(f"HEAL_09_StudyMetrics")
 # /* ----- 0. Prepare standard dataset for metrics report ----- */
 
 
-df = pd.read_csv(f"{der}/mysql_{today}.csv")
-log_out(f"df: Using mysql_today.csv' {df.shape}")
+mysql_00 = pd.read_csv(f"{out}/mysql_{today}.csv")
+log_out(f"mysql_00: Using mysql_today.csv' {mysql_00.shape}")
 
 # df = df[df["merge_awards_mds"] != 1]
-df = df[df["merge_awards_mds"].astype(str).str[0] != '1']  #now that merge_awards_mds is labeled for readability
-log_out(f"df: exclude where merge_awards_mds = 1' {df.shape}")
+mysql_01 = mysql_00[mysql_00["merge_awards_mds"].astype(str).str[0] != '1']  #now that merge_awards_mds is labeled for readability
+log_out(f"mysql_01: exclude where merge_awards_mds = 1' {mysql_01.shape}")
 
-df = df[df["guid_type"].isin([
+metrics = mysql_01[mysql_01["guid_type"].isin([
     "discovery_metadata",
     "unregistered_discovery_metadata"
 ])]
-log_out(f"df: keep where guid_type in (discovery_metadata,unregistered_discovery_metadata)' {df.shape}")
+log_out(f"metrics: keep where guid_type in (discovery_metadata,unregistered_discovery_metadata)' {metrics.shape}")
 
-metrics = df.copy()
-metrics.to_csv(f"{temp}/metrics_{today}.csv", index=False)
-log_out(f"metrics: renamed copy of df and saved to metrics_today.csv' {metrics.shape}")
+metrics.to_csv(f"{out}/metrics_{today}.csv", index=False)
+log_out(f"metrics: saved to metrics_today.csv' {metrics.shape}")
 
 
 
@@ -138,7 +130,7 @@ freq_entity_type.columns = ['entity_type', 'count']
 from openpyxl import load_workbook  
 
 # Load the template (read_only=False to allow writing)  
-wb = load_workbook(f"{out}/StudyMetrics_template_v2.xlsx")  
+wb = load_workbook(f"{templ}/StudyMetrics_template_v2.xlsx")  
  
 # Select the worksheet to write to (e.g., "Report")  
 ws = wb["Metrics"]  # Replace with your sheet name  
@@ -148,14 +140,11 @@ ws["C2"] = today
 # 1. Number of HEAL Studies C5, C9, C10, C11
 ws["C5"] = heal_studies["HEAL_studies"].max()
 
-entity_type = "Study"
-ws["C9"] = heal_studies[heal_studies["entity_type"] == entity_type]["HEAL_studies"].max()
+ws["C9"] = (heal_studies["entity_type"] == "Study").sum()
 
-entity_type = "CTN"
-ws["C10"] = heal_studies[heal_studies["entity_type"] == entity_type]["HEAL_studies"].max()
+ws["C10"] = (heal_studies["entity_type"] == "CTN").sum()
 
-entity_type = "Other"
-ws["C11"] = heal_studies[heal_studies["entity_type"] == entity_type]["HEAL_studies"].max()
+ws["C11"] = (heal_studies["entity_type"] == "Other").sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
@@ -163,37 +152,49 @@ wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 # 2. Number of studies registered B18-----
 print(metrics["is_registered"].value_counts(dropna=False))
 
-freq_is_registered = (
-    metrics["is_registered"]
-    .value_counts(dropna=False)   # include missing like SAS
-    .reset_index()
-)
-
-freq_is_registered.columns = ["is_registered", 'count']
-
-
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
  
 # Select the worksheet to write to (e.g., "Report")  
 ws = wb["Metrics"]  # Replace with your sheet name  
 
-start_row = 18  # Excel row number (A2 = row 5)  
-start_col = 2  # Excel column number (A = column 1)
-
-df_values = freq_is_registered.values  
-
-# Iterate over rows and columns to write values  
-for row_idx, row_data in enumerate(df_values):  
-    for col_idx, value in enumerate(row_data):  
-        # Calculate Excel cell coordinates (1-based)  
-        excel_row = start_row + row_idx  
-        excel_col = start_col + col_idx  
- 
-        # Write only the value (preserves formatting)  
-        ws.cell(row=excel_row, column=excel_col).value = value
+ws["C18"] = (metrics["is_registered"] == "registered").sum()
+ws["C19"] = (metrics["is_registered"] == "not registered").sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
+
+
+# freq_is_registered = (
+#     metrics["is_registered"]
+#     .value_counts(dropna=False)   # include missing like SAS
+#     .reset_index()
+# )
+
+# freq_is_registered.columns = ["is_registered", 'count']
+
+
+# # Load the template (read_only=False to allow writing)  
+# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+ 
+# # Select the worksheet to write to (e.g., "Report")  
+# ws = wb["Metrics"]  # Replace with your sheet name  
+
+# start_row = 18  # Excel row number (A2 = row 5)  
+# start_col = 2  # Excel column number (A = column 1)
+
+# df_values = freq_is_registered.values  
+
+# # Iterate over rows and columns to write values  
+# for row_idx, row_data in enumerate(df_values):  
+#     for col_idx, value in enumerate(row_data):  
+#         # Calculate Excel cell coordinates (1-based)  
+#         excel_row = start_row + row_idx  
+#         excel_col = start_col + col_idx  
+ 
+#         # Write only the value (preserves formatting)  
+#         ws.cell(row=excel_row, column=excel_col).value = value
+
+# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 
@@ -235,14 +236,6 @@ df4["slmd"] = np.where(
 
 print(df4["slmd"].value_counts(dropna=False))
 
-freq_slmd = (
-    df4["slmd"]
-    .value_counts(dropna=False)   # include missing like SAS
-    .reset_index()
-)
-
-freq_slmd.columns = ["slmd", 'count']
-
 
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
@@ -250,38 +243,51 @@ wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")
 # Select the worksheet to write to (e.g., "Report")  
 ws = wb["Metrics"]  # Replace with your sheet name  
 
-start_row = 31  # Excel row number
-start_col = 2  # Excel column number 
-
-# Extract DataFrame values as a numpy array  
-# freq_entity_type.columns = ['entity_type', 'count']
-
-df_values = freq_slmd.values  
-
-# Iterate over rows and columns to write values  
-for row_idx, row_data in enumerate(df_values):  
-    for col_idx, value in enumerate(row_data):  
-        # Calculate Excel cell coordinates (1-based)  
-        excel_row = start_row + row_idx  
-        excel_col = start_col + col_idx  
- 
-        # Write only the value (preserves formatting)  
-        ws.cell(row=excel_row, column=excel_col).value = value
+ws["C31"] = (df4["slmd"] == 1).sum()
+ws["C32"] = (df4["slmd"] == 0).sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
+
+
+# freq_slmd = (
+#     df4["slmd"]
+#     .value_counts(dropna=False)   # include missing like SAS
+#     .reset_index()
+# )
+
+# freq_slmd.columns = ["slmd", 'count']
+
+
+# # Load the template (read_only=False to allow writing)  
+# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+ 
+# # Select the worksheet to write to (e.g., "Report")  
+# ws = wb["Metrics"]  # Replace with your sheet name  
+
+# start_row = 31  # Excel row number
+# start_col = 2  # Excel column number 
+
+# # Extract DataFrame values as a numpy array  
+# # freq_entity_type.columns = ['entity_type', 'count']
+
+# df_values = freq_slmd.values  
+
+# # Iterate over rows and columns to write values  
+# for row_idx, row_data in enumerate(df_values):  
+#     for col_idx, value in enumerate(row_data):  
+#         # Calculate Excel cell coordinates (1-based)  
+#         excel_row = start_row + row_idx  
+#         excel_col = start_col + col_idx  
+ 
+#         # Write only the value (preserves formatting)  
+#         ws.cell(row=excel_row, column=excel_col).value = value
+
+# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 # 5. HEAL studies by data sharing intention B39-----
 print(metrics["gen3_data_availability"].value_counts(dropna=False))
 
-freq_data_availability = (
-    metrics["gen3_data_availability"]
-    .value_counts(dropna=False)   # include missing like SAS
-    .reset_index()
-)
-
-freq_data_availability.columns = ["gen3_data_availability", 'count']
-
 
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
@@ -289,25 +295,48 @@ wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")
 # Select the worksheet to write to (e.g., "Report")  
 ws = wb["Metrics"]  # Replace with your sheet name  
 
-start_row = 39  # Excel row number (A2 = row 5)  
-start_col = 2  # Excel column number (A = column 1)
-
-# Extract DataFrame values as a numpy array  
-# freq_entity_type.columns = ['entity_type', 'count']
-
-df_values = freq_data_availability.values  
-
-# Iterate over rows and columns to write values  
-for row_idx, row_data in enumerate(df_values):  
-    for col_idx, value in enumerate(row_data):  
-        # Calculate Excel cell coordinates (1-based)  
-        excel_row = start_row + row_idx  
-        excel_col = start_col + col_idx  
- 
-        # Write only the value (preserves formatting)  
-        ws.cell(row=excel_row, column=excel_col).value = value
+ws["C39"] = metrics["gen3_data_availability"].isna().sum()
+ws["C40"] = (metrics["gen3_data_availability"] == "unaccessible").sum()
+ws["C41"] = (metrics["gen3_data_availability"] == "not_available").sum()
+ws["C42"] = (metrics["gen3_data_availability"] == "mixed_availability").sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
+
+
+# freq_data_availability = (
+#     metrics["gen3_data_availability"]
+#     .value_counts(dropna=False)   # include missing like SAS
+#     .reset_index()
+# )
+
+# freq_data_availability.columns = ["gen3_data_availability", 'count']
+
+
+# # Load the template (read_only=False to allow writing)  
+# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+ 
+# # Select the worksheet to write to (e.g., "Report")  
+# ws = wb["Metrics"]  # Replace with your sheet name  
+
+# start_row = 39  # Excel row number (A2 = row 5)  
+# start_col = 2  # Excel column number (A = column 1)
+
+# # Extract DataFrame values as a numpy array  
+# # freq_entity_type.columns = ['entity_type', 'count']
+
+# df_values = freq_data_availability.values  
+
+# # Iterate over rows and columns to write values  
+# for row_idx, row_data in enumerate(df_values):  
+#     for col_idx, value in enumerate(row_data):  
+#         # Calculate Excel cell coordinates (1-based)  
+#         excel_row = start_row + row_idx  
+#         excel_col = start_col + col_idx  
+ 
+#         # Write only the value (preserves formatting)  
+#         ws.cell(row=excel_row, column=excel_col).value = value
+
+# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 # 6. Studies selecting repo B50 USE repository_selected-----
@@ -333,15 +362,6 @@ df6 = df6[df6["gen3_data_availability"] != "not_available"] #producing and shari
 # freq_has_repo.columns = ["has_repo", 'count']
 
 # Alt version of has_repo
-freq_has_repo = (
-    df6["repository_selected"]
-    .value_counts(dropna=False)   # include missing like SAS
-    .reset_index()
-)
-
-freq_has_repo.columns = ["repository_selected", 'count']
-print(df6["repository_selected"].value_counts(dropna=False))
-
 
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
@@ -349,54 +369,105 @@ wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")
 # Select the worksheet to write to (e.g., "Report")  
 ws = wb["Metrics"]  # Replace with your sheet name  
 
-start_row = 50  # Excel row number (A2 = row 5)  
-start_col = 2  # Excel column number (A = column 1)
-
-# Extract DataFrame values as a numpy array  
-# freq_entity_type.columns = ['entity_type', 'count']
-
-df_values = freq_has_repo.values  
-
-# Iterate over rows and columns to write values  
-for row_idx, row_data in enumerate(df_values):  
-    for col_idx, value in enumerate(row_data):  
-        # Calculate Excel cell coordinates (1-based)  
-        excel_row = start_row + row_idx  
-        excel_col = start_col + col_idx  
- 
-        # Write only the value (preserves formatting)  
-        ws.cell(row=excel_row, column=excel_col).value = value
+ws["C50"] = (df6["repository_selected"] == "Yes").sum()
+ws["C51"] = (df6["repository_selected"] == "No").sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 
+
+
+# freq_has_repo = (
+#     df6["repository_selected"]
+#     .value_counts(dropna=False)   # include missing like SAS
+#     .reset_index()
+# )
+
+# freq_has_repo.columns = ["repository_selected", 'count']
+# print(df6["repository_selected"].value_counts(dropna=False))
+
+
+# # Load the template (read_only=False to allow writing)  
+# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+ 
+# # Select the worksheet to write to (e.g., "Report")  
+# ws = wb["Metrics"]  # Replace with your sheet name  
+
+# start_row = 50  # Excel row number (A2 = row 5)  
+# start_col = 2  # Excel column number (A = column 1)
+
+# # Extract DataFrame values as a numpy array  
+# # freq_entity_type.columns = ['entity_type', 'count']
+
+# df_values = freq_has_repo.values  
+
+# # Iterate over rows and columns to write values  
+# for row_idx, row_data in enumerate(df_values):  
+#     for col_idx, value in enumerate(row_data):  
+#         # Calculate Excel cell coordinates (1-based)  
+#         excel_row = start_row + row_idx  
+#         excel_col = start_col + col_idx  
+ 
+#         # Write only the value (preserves formatting)  
+#         ws.cell(row=excel_row, column=excel_col).value = value
+
+# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
+
+
+
 # 8. Number of studies selecting each repo 8.Repository Names Worksheet-----
-df8 = metrics.copy()
+df8_00 = metrics.copy()
 
-df8 = df8[df8["gen3_data_availability"] != "not_available"]
+df8_01 = df8_00[df8_00["gen3_data_availability"] != "not_available"]
 
-df8 = df8[df8["repository_name"].str.strip() != ""]
+df8_02 = df8_01[df8_01["repository_name"].str.strip() != ""]
+df8_02["repository_name"] = df8_02["repository_name"].fillna("Missing")
 
-repo_counts = df8["repository_name"].value_counts()
+repo_counts = df8_02["repository_name"].value_counts()
 
 print("\nStudies selecting each repository")
 print(repo_counts)
 
-freq_repo_counts = (
-    df8["repository_name"]
-    .value_counts(dropna=False)   # include missing like SAS
-    .reset_index()
-)
+# 2. Get the value counts and reset the index
+freq_repo_counts = df8_02["repository_name"].value_counts(dropna=False).reset_index()
+freq_repo_counts.columns = ["repository_name", "count"]
 
-freq_repo_counts.columns = ["repository_name", 'count']
+# 3. Calculate percentage and cumulative percentage
+freq_repo_counts["percent"] = (freq_repo_counts["count"] / freq_repo_counts["count"].sum()) * 100
+freq_repo_counts["cum_percent"] = freq_repo_counts["percent"].cumsum()
+
+# 4. Round the columns to 2 decimal places
+freq_repo_counts["percent"] = freq_repo_counts["percent"].round(2)
+freq_repo_counts["cum_percent"] = freq_repo_counts["cum_percent"].round(2)
+
+# 5. Create the Total row as a new DataFrame
+total_row = pd.DataFrame([{
+    "repository_name": "Total",
+    "count": freq_repo_counts["count"].sum(),
+    "percent": freq_repo_counts["percent"].sum().round(2),
+    "cum_percent": None  # Left blank as cumulative total does not apply to a sum row
+}])
+
+# 6. Append the Total row to the bottom
+freq_repo_counts = pd.concat([freq_repo_counts, total_row], ignore_index=True)
+
+
+
+# freq_repo_counts = (
+#     df8["repository_name"]
+#     .value_counts(dropna=False)   # include missing like SAS
+#     .reset_index()
+# )
+
+# freq_repo_counts.columns = ["repository_name", 'count']
 
 
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
  
 # Select the worksheet to write to (e.g., "Report")  
-ws = wb["8. Repository Names"]  # Replace with your sheet name  
+ws = wb["7. Repository Names"]  # Replace with your sheet name  
 
 start_row = 3  # Excel row number 
 start_col = 1  # Excel column number 
@@ -458,14 +529,6 @@ df11 = df11[df11["gen3_data_availability"] != "not_available"]
 
 print(df11["data_linked_on_platform"].value_counts(dropna=False))
 
-freq_link_platf = (
-    df11["data_linked_on_platform"]
-    .value_counts(dropna=False)   # include missing like SAS
-    .reset_index()
-)
-
-freq_link_platf.columns = ["data_linked_on_platform", 'count']
-
 
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
@@ -473,25 +536,45 @@ wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")
 # Select the worksheet to write to (e.g., "Report")  
 ws = wb["Metrics"]  # Replace with your sheet name  
 
-start_row = 69  # Excel row number (A2 = row 5)  
-start_col = 2  # Excel column number (A = column 1)
-
-# Extract DataFrame values as a numpy array  
-# freq_entity_type.columns = ['entity_type', 'count']
-
-df_values = freq_link_platf.values  
-
-# Iterate over rows and columns to write values  
-for row_idx, row_data in enumerate(df_values):  
-    for col_idx, value in enumerate(row_data):  
-        # Calculate Excel cell coordinates (1-based)  
-        excel_row = start_row + row_idx  
-        excel_col = start_col + col_idx  
- 
-        # Write only the value (preserves formatting)  
-        ws.cell(row=excel_row, column=excel_col).value = value
+ws["C69"] = (df11["data_linked_on_platform"] == "Yes").sum()
+ws["C70"] = (df11["data_linked_on_platform"] == "No").sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
+
+# freq_link_platf = (
+#     df11["data_linked_on_platform"]
+#     .value_counts(dropna=False)   # include missing like SAS
+#     .reset_index()
+# )
+
+# freq_link_platf.columns = ["data_linked_on_platform", 'count']
+
+
+# # Load the template (read_only=False to allow writing)  
+# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+ 
+# # Select the worksheet to write to (e.g., "Report")  
+# ws = wb["Metrics"]  # Replace with your sheet name  
+
+# start_row = 69  # Excel row number (A2 = row 5)  
+# start_col = 2  # Excel column number (A = column 1)
+
+# # Extract DataFrame values as a numpy array  
+# # freq_entity_type.columns = ['entity_type', 'count']
+
+# df_values = freq_link_platf.values  
+
+# # Iterate over rows and columns to write values  
+# for row_idx, row_data in enumerate(df_values):  
+#     for col_idx, value in enumerate(row_data):  
+#         # Calculate Excel cell coordinates (1-based)  
+#         excel_row = start_row + row_idx  
+#         excel_col = start_col + col_idx  
+ 
+#         # Write only the value (preserves formatting)  
+#         ws.cell(row=excel_row, column=excel_col).value = value
+
+# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 
@@ -548,17 +631,17 @@ wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 # 12. Other metrics C76 C78 C80 B83-----
 
-mysql = pd.read_csv(f"{der}/mysql_{today}.csv")
+# Use df mysql_01 (initial ingest of mysql_today.csv file)
 
 # CTN protocols
-ctn = mysql[mysql["mds_ctn_flag"] == 1]
+ctn = mysql_01[mysql_01["mds_ctn_flag"] == 1]
 print("Number of CTN Protocols:", len(ctn))
 
 # MySQL studies
 # read CSV with all columns as strings
 studies = pd.read_csv(
-    f"{der}/study_lookup_table.csv",
-    sep=';',                # Semicolon delimiter
+    f"{inp}/study_lookup_table.csv",
+    sep=',',                # Semicolon delimiter
     engine='python',        # Use Python engine for complex parsing
     # quoting=3,              # QUOTE_NONE, avoids treating quotes specially
     encoding='cp1252',
@@ -581,11 +664,12 @@ studies["xstudy_id"] = pd.to_numeric(studies["xstudy_id"], errors="coerce")
 print("Number of MySQL studies:", studies["xstudy_id"].nunique())
 
 # MySQL awards
-awards = mysql[mysql["merge_awards_mds"].astype(str).str[0] != '2']
-awards = awards[awards["appl_id"] != ""]
-awards = awards["appl_id"].drop_duplicates()
+awards_00 = mysql_01[mysql_01["merge_awards_mds"].astype(str).str[0] != '2']
+awards_01 = awards_00[awards_00["appl_id"] != ""]
+# Select both columns, but only look at appl_id to find duplicates
+awards_02 = awards_01[["appl_id", "entity_type"]].drop_duplicates(subset=["appl_id"])
 
-print("Number of MySQL awards:", len(awards))
+print("Number of MySQL awards:", len(awards_02))
 
 # Load the template (read_only=False to allow writing)  
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
@@ -595,38 +679,61 @@ ws = wb["Metrics"]  # Replace with your sheet name
 
 ws["C76"] = len(ctn)
 ws["C78"] = studies["xstudy_id"].nunique()
-ws["C80"] = len(awards)
+ws["C80"] = len(awards_02)
 
 
+ws["C83"] = (awards_02["entity_type"] == "Study").sum()
+
+ws["C84"] = (awards_02["entity_type"] == "CTN").sum()
+
+ws["C85"] = (awards_02["entity_type"] == "Other").sum()
 
 
-# start_row = 83  # Excel row number (A2 = row 5)  
-# start_col = 2  # Excel column number (A = column 1)
-
-# Extract DataFrame values as a numpy array  
-# freq_entity_type.columns = ['entity_type', 'count']
-
-# df_values = freq_entity_type.values  
-
-# Iterate over rows and columns to write values  
-# for row_idx, row_data in enumerate(df_values):  
-#     for col_idx, value in enumerate(row_data):  
-#         # Calculate Excel cell coordinates (1-based)  
-#         excel_row = start_row + row_idx  
-#         excel_col = start_col + col_idx  
- 
-#         # Write only the value (preserves formatting)  
-#         ws.cell(row=excel_row, column=excel_col).value = value
-
-# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
+wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 # Write MySQL Tables to Worksheets
-# wb_filepath = f"{out}/StudyMetrics_{today}.xlsx"
+wb_filepath = f"{out}/StudyMetrics_{today}.xlsx"
 
-# with pd.ExcelWriter(wb_filepath, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-#     # 3. Write your DataFrame directly
-#     mysql_today_noabs.to_excel(writer, sheet_name='Derived_mysql_today', index=False)
+
+
+# Write source table to StudyMetrics Report for drill down purposes
+mysql_xlsx_00 = pd.read_csv(f"{out}/mysql_{today}.csv")
+mysql_xlsx_01 = mysql_xlsx_00.drop(columns='proj_abs')
+
+# Move 'col_C' and 'col_D' to the front
+target_cols = ['compound_key','appl_id', 'hdp_id','merge_awards_mds', 'merge_reporter_awards']
+cols = target_cols + [col for col in mysql_xlsx_01.columns if col not in target_cols]
+mysql_xlsx_02 = mysql_xlsx_01[cols]
+
+# order by compound_key
+mysql_xlsx_03 = mysql_xlsx_02.sort_values(by='compound_key')
+
+
+with pd.ExcelWriter(wb_filepath, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+    # 3. Write your DataFrame directly
+    mysql_xlsx_03.to_excel(writer, sheet_name='mysql_today', index=False)
+
+with pd.ExcelWriter(wb_filepath, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+    # 3. Write your DataFrame directly
+    studies.to_excel(writer, sheet_name='study_lookup_table', index=False)
+
+
+# 1. Open the existing Excel file
+wb = openpyxl.load_workbook(wb_filepath)
+
+# 2. Select the specific worksheet
+if "mysql_today" in wb.sheetnames:
+    ws = wb["mysql_today"]
+    
+    # 3. Add the autofilter to the entire data range
+    ws.auto_filter.ref = ws.dimensions
+
+    # 4. Freeze the top row (everything above row 2)
+    ws.freeze_panes = 'F2'
+
+    # 5. Save the changes back to the file
+    wb.save(wb_filepath)
 
     
 # END HEAL_09_StudyMetrics
