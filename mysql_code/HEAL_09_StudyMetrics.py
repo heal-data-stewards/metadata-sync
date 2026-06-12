@@ -629,7 +629,7 @@ wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
 
 
-# 12. Other metrics C76 C78 C80 B83-----
+# # 12. Other metrics C76 C78 C80 B83-----
 
 # Use df mysql_01 (initial ingest of mysql_today.csv file)
 
@@ -659,9 +659,9 @@ for col in studies.select_dtypes(include="object").columns:
 
 
 
-studies["xstudy_id"] = pd.to_numeric(studies["xstudy_id"], errors="coerce")
+# studies["xstudy_id"] = pd.to_numeric(studies["xstudy_id"], errors="coerce")
 
-print("Number of MySQL studies:", studies["xstudy_id"].nunique())
+# print("Number of MySQL studies:", studies["xstudy_id"].nunique())
 
 # MySQL awards
 awards_00 = mysql_01[mysql_01["merge_awards_mds"].astype(str).str[0] != '2']
@@ -671,11 +671,11 @@ awards_02 = awards_01[["appl_id", "entity_type"]].drop_duplicates(subset=["appl_
 
 print("Number of MySQL awards:", len(awards_02))
 
-# Load the template (read_only=False to allow writing)  
-wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+# # Load the template (read_only=False to allow writing)  
+# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
  
-# Select the worksheet to write to (e.g., "Report")  
-ws = wb["Metrics"]  # Replace with your sheet name  
+# # Select the worksheet to write to (e.g., "Report")  
+# ws = wb["Metrics"]  # Replace with your sheet name  
 
 ws["C76"] = len(ctn)
 ws["C78"] = studies["xstudy_id"].nunique()
@@ -736,7 +736,7 @@ if "mysql_today" in wb.sheetnames:
     wb.save(wb_filepath)
 
     
-# END HEAL_09_StudyMetrics
+# # END HEAL_09_StudyMetrics
     
     
 
