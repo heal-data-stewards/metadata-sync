@@ -117,7 +117,8 @@ def build_study_lookup_table(
     mysql_df["has_subproj_num_by_sernum"] = (
         mysql_df.groupby("proj_ser_num")["xhas_subproj_num"].transform("max")
     )
-    mysql_df.to_csv(export_debug/"mysql_w_has_subproject.csv", index=False)
+    if export_debug is not None:
+        mysql_df.to_csv(export_debug/"mysql_w_has_subproject.csv", index=False)
     mysql_df.drop(columns=["xhas_subproj_num"], inplace=True)
 
     combined_df = pd.concat([mysql_df, reporter_dqaudit_df], ignore_index=True, sort=False)
@@ -134,11 +135,13 @@ def build_study_lookup_table(
     combined_df["study_id"] = group_ids(combined_df[has_hdp], ["xstudy_id_stewards", "hdp_id"], "study_id").reindex(combined_df.index)
     combined_df["study_id"] = combined_df["study_id"].astype("Int64")
     combined_df = combined_df[["study_id", "xstudy_id_stewards"] + [c for c in combined_df.columns if c not in {"study_id", "xstudy_id_stewards"}]]
-    combined_df.to_csv(export_debug/"mysql_today_withstudyid.csv", index=False) # Seems to be a match with the stata counterpart. Number or xstudy_id_stewards and study_id match
+    if export_debug is not None:
+        combined_df.to_csv(export_debug/"mysql_today_withstudyid.csv", index=False)
 
     # Stata lines 128-132: QC check — rows missing study_id but with a valid xstudy_id_stewards
     check_studyid = combined_df[combined_df["study_id"].isna() & combined_df["xstudy_id_stewards"].notna()]
-    check_studyid.to_csv(export_debug/"check_studyid_assigns.csv", index=False)
+    if export_debug is not None:
+        check_studyid.to_csv(export_debug/"check_studyid_assigns.csv", index=False)
     print(f"Rows missing study_id but with xstudy_id_stewards: {len(check_studyid)}") # Match 1319
 
     # Counts for QC and later selection logic
@@ -149,7 +152,8 @@ def build_study_lookup_table(
         .size()
         .reset_index(name="num_appl_by_xstudyidstewards")
     )
-    sis_count.to_csv(export_debug/"sis_count.csv", index=False) #Match: 2338
+    if export_debug is not None:
+        sis_count.to_csv(export_debug/"sis_count.csv", index=False)
 
     hdp_cols = (
         combined_df[["xstudy_id_stewards", "hdp_id", "archived"]]
@@ -167,7 +171,8 @@ def build_study_lookup_table(
         )
         .reset_index()
     )
-    hdpid_count.to_csv(export_debug/"hdpid_count.csv", index=False) #Match: 1621
+    if export_debug is not None:
+        hdpid_count.to_csv(export_debug/"hdpid_count.csv", index=False)
     print(f"Number of rows in hdpid_count is: {len(hdpid_count)}")
     combined_df = combined_df.merge(sis_count, on="xstudy_id_stewards", how="left")
     combined_df = combined_df.merge(hdpid_count, on="xstudy_id_stewards", how="left")
@@ -183,7 +188,8 @@ def build_study_lookup_table(
     combined_df["num_hdp_by_appl"] = pd.to_numeric(combined_df["num_hdp_by_appl"], errors="coerce").astype("Int64").fillna(0)
 
     mysql_hasappls_df = combined_df.copy()
-    mysql_hasappls_df.to_csv(export_debug/"mysql_hasappls_today.csv", index=False)
+    if export_debug is not None:
+        mysql_hasappls_df.to_csv(export_debug/"mysql_hasappls_today.csv", index=False)
     
     # QC check flags
     qc = mysql_hasappls_df.copy()
@@ -359,7 +365,6 @@ def build_study_lookup_table(
         (bad_joined["num_live_hdps"] == 0)
     ].copy()
     print(f"Intermediate length of xstudyidgood5d: {len(xstudyidgood5d)}")
-    xstudyidgood5d.to_csv(export_debug/"xstudyidgood5d.csv", index=False)
     if not xstudyidgood5d.empty:
         xstudyidgood5d["gap"] = xstudyidgood5d["bgt_strt_date"].apply(parse_ymd_date) - xstudyidgood5d["zbgt_end_date"].apply(parse_ymd_date)
         xstudyidgood5d["gap"] = xstudyidgood5d["gap"].where(xstudyidgood5d["gap"] >= pd.Timedelta(0), pd.NaT)
@@ -375,8 +380,7 @@ def build_study_lookup_table(
         xstudyidgood5d["any_match"] = xstudyidgood5d.groupby("appl_id")["match"].transform("max")
         xstudyidgood5d = xstudyidgood5d[~((xstudyidgood5d["match"] == 0) & (xstudyidgood5d["any_match"] == 1))].copy()
         xstudyidgood5d["rowcount"] = xstudyidgood5d.groupby("appl_id")["appl_id"].transform("size")
-        xstudyidgood5d.to_csv(export_debug/"xstudyidgood5d_tmp.csv", index=False)
-        print(f"Number of records in xstudyidgood5d: {len(xstudyidgood5d)}") # Match 114
+        print(f"Number of records in xstudyidgood5d: {len(xstudyidgood5d)}")
 
         studyidgood5d_1 = xstudyidgood5d[xstudyidgood5d["rowcount"] == 1].copy()
         studyidgood5d_1["study_id"] = studyidgood5d_1["zstudy_id"].astype("Int64")
@@ -594,8 +598,6 @@ def build_study_lookup_table(
     recent["fisc_yr"] = pd.to_numeric(recent["fisc_yr"], errors="coerce").astype("Int64")
     recent["latest_fy"] = recent.groupby("study_id_final")["fisc_yr"].transform("max")
     fy_keep = (recent["latest_fy"] == recent["fisc_yr"]) | (recent["fisc_yr"].isna() & recent["latest_fy"].isna())
-    if export_debug is not None:
-        recent[~fy_keep][["study_id_final", "appl_id", "fisc_yr", "latest_fy"]].to_csv(export_debug / "step7_fy_dropped.csv", index=False)
     recent = recent[fy_keep].copy()
     print(f"  [step7 diag] after latest_fy filter: {len(recent)}")
 
