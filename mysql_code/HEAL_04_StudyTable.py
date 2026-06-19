@@ -73,11 +73,34 @@ def group_ids(df: pd.DataFrame, cols, name: str) -> pd.Series:
     return df.groupby(cols, dropna=False).ngroup().add(1).astype("Int64")
 
 
+_TRACE_COLS = [
+    "appl_id", "xstudy_id_stewards", "study_id", "study_id_final",
+    "hdp_id", "compound_key", "proj_ser_num", "subproj_id",
+    "proj_num_spl_sfx_code", "in_mysql",
+    "num_hdp_by_xstudyidstewards", "num_appl_by_xstudyidstewards",
+]
+
+
+def _trace(label: str, df: pd.DataFrame, track_ids: list, extra_cols=None):
+    """Print rows for tracked appl_ids at a named pipeline step."""
+    if not track_ids:
+        return
+    cols = [c for c in _TRACE_COLS + (extra_cols or []) if c in df.columns]
+    rows = df[df["appl_id"].isin(track_ids)]
+    if rows.empty:
+        print(f"  [TRACE] {label}: none of {track_ids} in this frame")
+    else:
+        print(f"  [TRACE] {label}: {len(rows)} row(s)")
+        print(rows[cols].to_string(index=False))
+        print()
+
+
 def build_study_lookup_table(
     mysql_df: pd.DataFrame,
     reporter_dqaudit_df: pd.DataFrame,
     manual_matches_df: Optional[pd.DataFrame] = None,
     export_debug: Optional[Path] = None,
+    track_appl_ids: Optional[list] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Recreate HEAL_04_StudyTable.do logic in Python."""
     mysql_df = mysql_df.copy()
@@ -118,7 +141,7 @@ def build_study_lookup_table(
         mysql_df.groupby("proj_ser_num")["xhas_subproj_num"].transform("max")
     )
     if export_debug is not None:
-        mysql_df.to_csv(export_debug/"mysql_w_has_subproject.csv", index=False)
+        mysql_df.to_csv(export_debug/"step1a_mysql_with_subproject_flag.csv", index=False)
     mysql_df.drop(columns=["xhas_subproj_num"], inplace=True)
 
     combined_df = pd.concat([mysql_df, reporter_dqaudit_df], ignore_index=True, sort=False)
@@ -130,18 +153,20 @@ def build_study_lookup_table(
     combined_df = clean_string_columns(combined_df, stewards_id_vars)
 
     combined_df["xstudy_id_stewards"] = group_ids(combined_df, stewards_id_vars, "xstudy_id_stewards")
+    _trace("step1b: xstudy_id_stewards assigned", combined_df, track_appl_ids or [])
 
     has_hdp = combined_df["hdp_id"].notna() & (combined_df["hdp_id"].astype(str) != "")
     combined_df["study_id"] = group_ids(combined_df[has_hdp], ["xstudy_id_stewards", "hdp_id"], "study_id").reindex(combined_df.index)
     combined_df["study_id"] = combined_df["study_id"].astype("Int64")
     combined_df = combined_df[["study_id", "xstudy_id_stewards"] + [c for c in combined_df.columns if c not in {"study_id", "xstudy_id_stewards"}]]
+    _trace("step1b: initial study_id (hdp-based)", combined_df, track_appl_ids or [])
     if export_debug is not None:
-        combined_df.to_csv(export_debug/"mysql_today_withstudyid.csv", index=False)
+        combined_df.to_csv(export_debug/"step1b_combined_with_xstudy_id_stewards.csv", index=False)
 
     # Stata lines 128-132: QC check — rows missing study_id but with a valid xstudy_id_stewards
     check_studyid = combined_df[combined_df["study_id"].isna() & combined_df["xstudy_id_stewards"].notna()]
     if export_debug is not None:
-        check_studyid.to_csv(export_debug/"check_studyid_assigns.csv", index=False)
+        check_studyid.to_csv(export_debug/"step1b_qc_missing_study_id.csv", index=False)
     print(f"Rows missing study_id but with xstudy_id_stewards: {len(check_studyid)}") # Match 1319
 
     # Counts for QC and later selection logic
@@ -153,7 +178,7 @@ def build_study_lookup_table(
         .reset_index(name="num_appl_by_xstudyidstewards")
     )
     if export_debug is not None:
-        sis_count.to_csv(export_debug/"sis_count.csv", index=False)
+        sis_count.to_csv(export_debug/"step1c_appl_count_by_xstudy_id_stewards.csv", index=False)
 
     hdp_cols = (
         combined_df[["xstudy_id_stewards", "hdp_id", "archived"]]
@@ -172,7 +197,7 @@ def build_study_lookup_table(
         .reset_index()
     )
     if export_debug is not None:
-        hdpid_count.to_csv(export_debug/"hdpid_count.csv", index=False)
+        hdpid_count.to_csv(export_debug/"step1c_hdp_count_by_xstudy_id_stewards.csv", index=False)
     print(f"Number of rows in hdpid_count is: {len(hdpid_count)}")
     combined_df = combined_df.merge(sis_count, on="xstudy_id_stewards", how="left")
     combined_df = combined_df.merge(hdpid_count, on="xstudy_id_stewards", how="left")
@@ -181,16 +206,17 @@ def build_study_lookup_table(
     combined_df["compound_key"] = combined_df["appl_id"].fillna("").astype(str) + "_" + combined_df["hdp_id"].fillna("").astype(str)
 
     print(f"Does the input table already have num_hdp_by_appl? {'num_hdp_by_appl' in combined_df.columns}")
- 
+
     if "num_hdp_by_appl" not in combined_df.columns:
         combined_df["num_hdp_by_appl"] = 0
-    
+
     combined_df["num_hdp_by_appl"] = pd.to_numeric(combined_df["num_hdp_by_appl"], errors="coerce").astype("Int64").fillna(0)
 
     mysql_hasappls_df = combined_df.copy()
     if export_debug is not None:
-        mysql_hasappls_df.to_csv(export_debug/"mysql_hasappls_today.csv", index=False)
-    
+        mysql_hasappls_df.to_csv(export_debug/"step1d_mysql_with_counts.csv", index=False)
+    _trace("step1d: after counts merged (xstudy_id_stewards + hdp counts)", mysql_hasappls_df, track_appl_ids or [])
+
     # QC check flags
     qc = mysql_hasappls_df.copy()
     qc["valid_flag"] = 0
@@ -208,13 +234,25 @@ def build_study_lookup_table(
 
     if export_debug is not None:
         print(f"Number of QC Issues: {len(qc_issues)}") ## MATCH: 358 ROWS.
-        qc_issues.to_csv(export_debug / "sis_hdpid_comparison_issues.csv", index=False)
+        qc_issues.to_csv(export_debug / "step2_qc_issues.csv", index=False)
 
     ### STEP 2
     hdpid0 = mysql_hasappls_df[mysql_hasappls_df["num_hdp_by_xstudyidstewards"] == 0].copy()
     print(f"Number of hdpid0 records: {len(hdpid0)}") # Match 244
     hdpid1 = mysql_hasappls_df[mysql_hasappls_df["num_hdp_by_xstudyidstewards"] == 1].copy()
     print(f"Number of hdpid0 records: {len(hdpid1)}") # Match 2254
+
+    # Trace which branch each tracked appl_id falls into
+    if track_appl_ids:
+        for aid in track_appl_ids:
+            if aid in hdpid0["appl_id"].values:
+                print(f"  [TRACE] appl_id={aid} → branch: hdpid0 (no HDP)")
+            elif aid in hdpid1["appl_id"].values:
+                print(f"  [TRACE] appl_id={aid} → branch: hdpid1 (one HDP)")
+            elif aid in mysql_hasappls_df["appl_id"].values:
+                print(f"  [TRACE] appl_id={aid} → branch: studyidbad (multiple HDPs, ambiguous)")
+            else:
+                print(f"  [TRACE] appl_id={aid} → not found in mysql_hasappls_df")
 
     studyidgood1 = mysql_hasappls_df[
         (mysql_hasappls_df["num_hdp_by_xstudyidstewards"] != 0) &
@@ -254,6 +292,7 @@ def build_study_lookup_table(
     hdpid0["study_id"] = hdpid0["tempn"].add(maxid)
     studyidgood3 = hdpid0[["study_id", "appl_id", "hdp_id", "compound_key", "in_mysql"]].copy()
     print(f"StudyIDGood3: {len(studyidgood3)}") # Match 244
+    _trace("step3: hdpid0 → new study_id (no HDP branch)", hdpid0, track_appl_ids or [])
 
     # Step 4: update hdpid1
     studyid_sis_key = (
@@ -267,6 +306,7 @@ def build_study_lookup_table(
     hdpid1.loc[hdpid1["study_id"].isna(), "study_id"] = hdpid1.loc[hdpid1["study_id"].isna(), "xstudy_id"]
     studyidgood4 = hdpid1[["study_id", "appl_id", "hdp_id", "compound_key", "in_mysql"]].copy()
     print(f"StudyIDGood4: {len(studyidgood4)}") # Match 9
+    _trace("step4: hdpid1 → study_id (one HDP branch)", hdpid1, track_appl_ids or [])
 
     # Step 5: handle studyidbad
     bad_nonmiss = studyidbad[studyidbad["hdp_id"].notna() & (studyidbad["hdp_id"].astype(str) != "")].copy()
@@ -331,7 +371,9 @@ def build_study_lookup_table(
     bad_joined = bad_joined.sort_values(["xstudy_id_stewards", "zarchived", "zhdp_id", "appl_id"])
     if export_debug is not None:
         print(f"Number of records in xstudyidgood5: {len(bad_joined)}") #Match, 354
-        bad_joined.to_csv(export_debug / "xstudyidgood5.csv", index=False)
+        bad_joined.to_csv(export_debug / "step5_bad_joined.csv", index=False)
+    _trace("step5: bad_joined (studyidbad with no HDP, pre-sub-branch)", bad_joined, track_appl_ids or [],
+           extra_cols=["count_actcode_matches", "num_appl_pairs", "num_live_hdps", "zstudy_id", "zappl_id", "zhdp_id"])
 
     xstudyidgood5a = bad_joined[
         (bad_joined["count_actcode_matches"] == 1) &
@@ -340,6 +382,7 @@ def build_study_lookup_table(
     xstudyidgood5a["study_id"] = xstudyidgood5a["zstudy_id"].astype("Int64")
     xstudyidgood5a = xstudyidgood5a[["study_id", "appl_id", "hdp_id", "compound_key"]]
     print(f"Number of records in xstudyidgood5a: {len(xstudyidgood5a)}") #Match 56
+    _trace("step5a: act_code match (1 match)", xstudyidgood5a, track_appl_ids or [])
 
     xstudyidgood5b = bad_joined[
         (bad_joined["count_actcode_matches"] != 1) &
@@ -348,6 +391,7 @@ def build_study_lookup_table(
     xstudyidgood5b["study_id"] = xstudyidgood5b["zstudy_id"].astype("Int64")
     xstudyidgood5b = xstudyidgood5b[["study_id", "appl_id", "hdp_id", "compound_key", "xstudy_id_stewards"]]
     print(f"Number of records in xstudyidgood5b: {len(xstudyidgood5b)}") #Match 10
+    _trace("step5b: single appl pair", xstudyidgood5b, track_appl_ids or [])
 
     xstudyidgood5c = bad_joined[
         (bad_joined["count_actcode_matches"] != 1) &
@@ -358,6 +402,7 @@ def build_study_lookup_table(
     xstudyidgood5c["study_id"] = xstudyidgood5c["zstudy_id"].astype("Int64")
     xstudyidgood5c = xstudyidgood5c[["study_id", "appl_id", "hdp_id", "compound_key"]]
     print(f"Number of records in xstudyidgood5c: {len(xstudyidgood5c)}")
+    _trace("step5c: single live HDP match", xstudyidgood5c, track_appl_ids or [])
 
     xstudyidgood5d = bad_joined[
         (bad_joined["count_actcode_matches"] != 1) &
@@ -399,11 +444,14 @@ def build_study_lookup_table(
         studyidgood5d_2 = pd.DataFrame(columns=["study_id", "appl_id", "hdp_id", "compound_key", "xstudy_id_stewards"])
         nomatches5d = pd.DataFrame(columns=bad_joined.columns)
 
+    _trace("step5d_1: gap match single row", studyidgood5d_1, track_appl_ids or [])
+    _trace("step5d_2: gap match multi row", studyidgood5d_2, track_appl_ids or [])
+
     if export_debug is not None:
-        studyidgood5d_1.to_csv(export_debug / "studyidgood5d_1.csv", index=False)
+        studyidgood5d_1.to_csv(export_debug / "step5d1_gap_match_single.csv", index=False)
         print(f"Number of records in xstudyidgood5d_1: {len(studyidgood5d_1)}") # Match 33
 
-        studyidgood5d_2.to_csv(export_debug / "studyidgood5d_2.csv", index=False)
+        studyidgood5d_2.to_csv(export_debug / "step5d2_gap_match_multi.csv", index=False)
         print(f"Number of records in xstudyidgood5d_2: {len(studyidgood5d_2)}") # Match 30
 
         print(f"Number of records in nomatches5d: {len(nomatches5d)}") #Match 51
@@ -438,8 +486,8 @@ def build_study_lookup_table(
     print(f"Manual match template rows: {len(manual_template)}") # Stata: ~99
 
     if export_debug is not None:
-        nomatches5d.to_csv(export_debug / "nomatches5d.csv", index=False)
-        manual_template.to_csv(export_debug / "xstudy_manual_matches.csv", index=False)
+        nomatches5d.to_csv(export_debug / "step5d_nomatches.csv", index=False)
+        manual_template.to_csv(export_debug / "step5e_manual_match_template.csv", index=False)
 
     if manual_matches_df is None:
         raise ValueError(
@@ -479,6 +527,8 @@ def build_study_lookup_table(
     manual["rowcount"] = manual.groupby("appl_id")["appl_id"].transform("size")
     print(f"  [5e diag] rowcount distribution:\n{manual['rowcount'].value_counts().sort_index()}")
     print(f"Number of records in matches5e: {len(manual)}") #Match 89
+    if export_debug is not None:
+        manual.to_csv(export_debug / "step5e_manual_prestep.csv", index=False)
 
     studyidgood5e_1 = manual[manual["rowcount"] == 1].copy()
     studyidgood5e_1["study_id"] = studyidgood5e_1["zstudy_id"].astype("Int64")
@@ -511,6 +561,9 @@ def build_study_lookup_table(
     studyidgood5e_3["study_id"] = studyidgood5e_3["zstudy_id"].astype("Int64")
     studyidgood5e_3 = studyidgood5e_3[["study_id", "appl_id", "hdp_id", "compound_key", "xstudy_id_stewards"]].copy()
     print(f"Number of records in studyidgood5e_3: {len(studyidgood5e_3)}") #Match 35
+    _trace("step5e_1: manual single match", studyidgood5e_1, track_appl_ids or [])
+    _trace("step5e_2: manual no-match → new study_id", studyidgood5e_2, track_appl_ids or [])
+    _trace("step5e_3: manual multi match", studyidgood5e_3, track_appl_ids or [])
 
     studyidgood5 = pd.concat(
         [
@@ -535,10 +588,12 @@ def build_study_lookup_table(
         sort=False,
     )
     print(f"Final Number of records in study id good5: {len(studyidmulti)}") #Match 75
+    
 
     studyidgood6 = bad_nonmiss[["zstudy_id", "zappl_id", "zhdp_id", "compound_key"]].copy()
     studyidgood6.columns = ["study_id", "appl_id", "hdp_id", "compound_key"]
     print(f"Final Number of records in studyidgood6: {len(studyidgood6)}") # Match 199
+    _trace("step6: studyidgood6 (bad_nonmiss records with HDP, z-renamed)", studyidgood6, track_appl_ids or [])
 
     studyidkey = pd.concat(
         [
@@ -553,20 +608,33 @@ def build_study_lookup_table(
         sort=False,
     )
     print(f"Number of records in StudyIDKey: {len(studyidkey)}") # Match 2918
-
+    
     studyidkey = studyidkey.drop_duplicates(subset=["compound_key"], keep="first")
     studyidkey = studyidkey.rename(columns={"study_id": "study_id_final"})
     print(f"Number of records in StudyIDKey: {len(studyidkey)}")
+    if export_debug:
+        studyidkey.to_csv(export_debug/"step6_studyidkey.csv", index=False)
+    
 
     mysql_studyid = mysql_hasappls_df.copy()
+    
+    mysql_studyid.to_csv(export_debug/"mysql_studyid_0.csv", index=False)
+    _trace("mysql_studyid_0", mysql_studyid, track_appl_ids or [])
+
     mysql_studyid = mysql_studyid.merge(
         studyidkey[["compound_key", "study_id_final"]],
         on="compound_key",
         how="left",
     )
+    mysql_studyid.to_csv(export_debug/"mysql_studyid_1.csv", index=False)
+    _trace("mysql_studyid_1", mysql_studyid, track_appl_ids or [])
+    
     mysql_studyid = mysql_studyid.sort_values(["study_id_final", "appl_id", "hdp_id"])
     mysql_studyid = mysql_studyid.drop(columns=["study_id", "xstudy_id_stewards"], errors="ignore")
     print(f"Number of records in mysql_studyid: {len(mysql_studyid)}") # Match 2951
+    mysql_studyid.to_csv(export_debug/"mysql_studyid_2.csv", index=False)
+    _trace("mysql_studyid_2", mysql_studyid, track_appl_ids or [])
+
 
     if not studyidmulti.empty:
         studyidmulti = studyidmulti.rename(columns={"study_id": "xstudy_id_final"})
@@ -578,10 +646,14 @@ def build_study_lookup_table(
         missing_final = mysql_studyid["study_id_final"].isna() & mysql_studyid["xstudy_id_final"].notna()
         mysql_studyid.loc[missing_final, "study_id_final"] = mysql_studyid.loc[missing_final, "xstudy_id_final"]
         mysql_studyid.drop(columns=["xstudy_id_final"], inplace=True)
+        mysql_studyid.to_csv(export_debug/"mysql_studyid_3.csv", index=False)
+        _trace("mysql_studyid_3", mysql_studyid, track_appl_ids or [])
+
 
     if export_debug is not None:
         print(f"Number of records in mysql_study at the end of Step 6: {len(mysql_studyid)}") #Match 2993
-        mysql_studyid.to_csv(export_debug / "mysql_studyid.csv", index=False)
+        mysql_studyid.to_csv(export_debug / "step6_mysql_with_study_id_final.csv", index=False)
+    _trace("step6: mysql_studyid after study_id_final merge", mysql_studyid, track_appl_ids or [])
 
     # Step 7: Most recent appl_id for each study
     recent = mysql_studyid.copy()
@@ -697,6 +769,7 @@ def build_study_lookup_table(
     ]
     study_table = study_table[output_columns]
     print(f"Number of entries in the Final study lookup table: {len(study_table)}")
+    _trace("step10: FINAL study_table (xstudy_id assigned)", study_table, track_appl_ids or [])
     
     study_table_dd = pd.DataFrame(
         [
@@ -766,7 +839,7 @@ def build_study_lookup_table(
         ]
     )
     
-    return study_table, study_table_dd
+    return study_table, study_table_dd, manual_template
 
 
 def main():
@@ -777,6 +850,10 @@ def main():
     parser.add_argument("--manual-matches-sheet", default="matches_2026-03-23", help="Sheet name to read from --manual-matches xlsx (ignored for CSV)")
     parser.add_argument("--output-dir", default=".", help="Directory to write study_lookup_table.csv and study_table_dd.csv")
     parser.add_argument("--debug-dir", help="Optional directory to write intermediate debug CSVs")
+    parser.add_argument(
+        "--track-appl-ids",
+        help="Comma-separated appl_ids to trace through each pipeline step (e.g. 1234567,8901234)",
+    )
     args = parser.parse_args()
 
     mysql_df = load_dataframe(Path(args.mysql_data))
@@ -789,18 +866,22 @@ def main():
     if debug_dir is not None:
         debug_dir.mkdir(parents=True, exist_ok=True)
 
-    study_table, study_table_dd = build_study_lookup_table(
+    track_ids = [x.strip() for x in args.track_appl_ids.split(",")] if args.track_appl_ids else []
+
+    study_table, study_table_dd, manual_template = build_study_lookup_table(
         mysql_df,
         reporter_dqaudit_df,
         manual_matches_df=manual_matches_df,
         export_debug=debug_dir,
+        track_appl_ids=track_ids,
     )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     study_table.to_csv(output_dir / "study_lookup_table.csv", index=False)
     study_table_dd.to_csv(output_dir / "study_table_dd.csv", index=False)
-    print(f"Wrote study_lookup_table.csv and study_table_dd.csv to {output_dir}")
+    manual_template.to_csv(output_dir / "step5e_manual_match_template.csv", index=False)
+    print(f"Wrote study_lookup_table.csv, study_table_dd.csv, and step5e_manual_match_template.csv to {output_dir}")
 
 
 if __name__ == "__main__":
