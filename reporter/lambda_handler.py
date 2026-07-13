@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import sys
 from datetime import datetime, timezone
 import boto3
 from sqlalchemy import create_engine
@@ -9,7 +10,12 @@ from sqlalchemy.exc import SQLAlchemyError, NoSuchTableError
 from dotenv import load_dotenv
 import pandas as pd
 import logging
-from heal_award_segmenter_lib import process_awards, prepare_for_ingest
+
+_mysql_lambda_dir = os.path.join(os.path.dirname(__file__), "..", "mysql_lambda")
+if _mysql_lambda_dir not in sys.path:
+    sys.path.insert(0, os.path.abspath(_mysql_lambda_dir))
+
+from reporter_lib.heal_award_segmenter_lib import process_awards, prepare_for_ingest
 
 
 logger = logging.getLogger()
@@ -84,7 +90,7 @@ def lambda_handler(event, context):
     db_database = os.getenv('DB_NAME')
     db_target_tablename = os.getenv('TABLE_NAME', 'reporter_test')
     sns_topic_arn = os.getenv('REPORTER_SNS_TOPIC_ARN')
-    _default_dd = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reporter_dd.csv')
+    _default_dd = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mysql_lambda', 'reporter_lib', 'reporter_dd.csv')
     reporter_dd_path = os.getenv('REPORTER_DD_PATH', _default_dd)
 
     run_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
@@ -176,11 +182,11 @@ def main():
     Reads from a CSV file, processes, and prints results.
     """
     # Example CSV path, adjust as needed
-    csv_path = "/Users/hinashah/Documents/HEAL/ReporterCode/awards_01212026.csv"
+    csv_path = "/Users/hinashah/Documents/HEAL/ReporterCode/awards_sn_04242026.csv"
     df = pd.read_csv(csv_path, dtype={'Appl ID':str})
 
-    id_type = "appl_id"  # or "project_num"
-    project_id_col = "Appl ID"
+    id_type = "project_serial_num"  # or "project_num"
+    project_id_col = "project_serial_num"
     project_title_col = "Title"
 
     awards_df, pubs_df = process_awards(df, id_type, project_id_col, project_title_col, clean_non_utf=True)
@@ -191,11 +197,11 @@ def main():
     print(pubs_df.head())
 
     # Optionally save to CSV for testing
-    awards_df.to_csv("/Users/hinashah/Documents/HEAL/ReporterCode/Output_032026/awards_test.csv", index=False)
-    pubs_df.to_csv("/Users/hinashah/Documents/HEAL/ReporterCode/Output_032026/pubs_test.csv", index=False)
+    awards_df.to_csv("/Users/hinashah/Documents/HEAL/ReporterCode/Output_042026/awards_test.csv", index=False)
+    pubs_df.to_csv("/Users/hinashah/Documents/HEAL/ReporterCode/Output_042026/pubs_test.csv", index=False)
 
     reporter_df = prepare_for_ingest(awards_df)
-    reporter_df.to_csv("/Users/hinashah/Documents/HEAL/ReporterCode/Output_032026/reporter_test.csv", index=False)
+    reporter_df.to_csv("/Users/hinashah/Documents/HEAL/ReporterCode/Output_042026/reporter_test.csv", index=False)
 
 if __name__ == "__main__":
     main()

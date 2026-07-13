@@ -181,19 +181,23 @@ def merge_dict(dict_list):
                 d_new[k] = [v]
     return d_new
 
-# Columns to drop before ingestion into MySQL (per MySQL team decision, March 2026)
+# Columns to drop before ingestion into MySQL (per MySQL team decision, April 2026)
 COLS_TO_DROP = [
     "agency_code",
+    "agency_ic_admin.admin_funding_url",
+    "agency_ic_admin.admin_org_id",
     "agency_ic_fundings.direct_cost_ic",
     "agency_ic_fundings.indirect_cost_ic",
     "agency_ic_fundings.total_cost",
     "cfda_code",
     "cong_dist",
+    "covid_response",
     "full_study_section.group_code",
     "full_study_section.name",
     "full_study_section.sra_designator_code",
     "full_study_section.sra_flex_code",
     "full_study_section.srg_code",
+    "full_study_section.srg_flex",
     "geo_lat_lon.lat",
     "geo_lat_lon.lon",
     "is_active",
@@ -218,7 +222,7 @@ COLS_TO_DROP = [
     "spending_categories",
 ]
 
-# Column rename map for MySQL ingestion (per reporter_deletecol_renamevar_4ingest_03112026.py)
+# Column rename map for MySQL ingestion (per reporter_deletecol_renamevar_4ingest_04232026.py)
 RENAME_MAP = {
     "abstract_text": "proj_abs",
     "activity_code": "act_code",
@@ -269,7 +273,7 @@ RENAME_MAP = {
     "project_serial_num": "proj_ser_num",
     "project_start_date": "proj_strt_date",
     "project_title": "proj_title",
-    "spending_categories_desc": "spd_cat_[0]",
+    "spending_categories_desc": "spd_cat_des",
     "subproject_id": "subproj_id",
     "terms": "trms",
     "date_added": "date_added",
@@ -281,7 +285,7 @@ def prepare_for_ingest(df: pd.DataFrame) -> pd.DataFrame:
     unwanted columns and renaming the remaining ones.
 
     Columns dropped and rename mappings are sourced from
-    reporter_deletecol_renamevar_4ingest_03112026.py (MySQL team, March 2026).
+    reporter_deletecol_renamevar_4ingest_04232026.py (MySQL team, April 2026).
 
     Args:
         df: Flattened awards DataFrame (e.g. output of process_awards)

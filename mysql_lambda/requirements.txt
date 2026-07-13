@@ -1,0 +1,7 @@
+boto3
+mysql-connector-python
+numpy
+pandas
+pymysql
+python-dotenv
+sqlalchemy
