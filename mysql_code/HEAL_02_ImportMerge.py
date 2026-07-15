@@ -63,30 +63,24 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "2026-04-24"
+today = os.environ.get("today")
+
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
-
 # ----- 2. Filepaths ----- */
-# dir = Path(r"/rtpnfil03/rtpnfil03_vol4/NPTB2/EDC/Migrated/HEAL") #UNIX
-dir = Path(r"\\rtpnfil03\NPTB2\EDC\Migrated\HEAL") #WINDOwS
-raw = dir / "Extracts"
-der = dir / "Derived"
-prog = dir / "Programs"
-doc = dir / "Documentation"
-temp = dir / "temp"
+dir = Path(os.environ.get("dir"))
+inp = dir / "Input"
 out = dir / "Output"
-qc = out / "QC"
-backups = dir / "Backups"
+log = dir / "Log"
 
 # Logging
-log_path = os.path.join(out, f"HEAL_02_ImportMerge_{today}_log.txt")
+log_path = os.path.join(log, f"HEAL_02_ImportMerge_{today}_log.txt")
 with open(log_path, 'w') as f:
     pass  # 'w' mode truncates existing file or creates new blank file
 # open(f"{out}/StudyMetrics_{today}_log.txt", 'w').close() #Clears Log before running
 
 def log_out(message):
-    with open(f"{out}/HEAL_02_ImportMerge_{today}_log.txt", 'a') as f:
+    with open(f"{log}/HEAL_02_ImportMerge_{today}_log.txt", 'a') as f:
         print(message, file=f)
 
 log_out(f"HEAL_02_ImportMerge Log Run Date: {today}")
@@ -99,13 +93,14 @@ log_out(f"HEAL_02_ImportMerge Log Run Date: {today}")
 datasets = [
     "reporter",
     "awards",
-    "progress_tracker"
+    "progress_tracker",
+    "pi_emails"
 ]
 
 dfs = {}  # dictionary to hold your dataframes
 
 for name in datasets:
-    csv_file = raw / f"{name}_{today}.csv"
+    csv_file = inp / f"{name}_{today}.csv"
 
     # read CSV with all columns as strings
     # df = pd.read_csv(csv_file, dtype=str)
@@ -139,13 +134,66 @@ for name in datasets:
 # Load dfs
 df_reporter_00 = dfs["df_reporter"]
 print("df_reporter_00: " + str(df_reporter_00.shape))
-df_awards_00 = dfs["df_awards"]
+log_out(f"Import MySQL Reporter table: {str(df_reporter_00.shape)}")
+
+# Drops record where appl_id is missing
+df_awards_00 = dfs["df_awards"].dropna(subset=['appl_id'])
 print("df_awards_00: " + str(df_awards_00.shape))
+log_out(f"Import MySQL Awards table: {str(df_awards_00.shape)}")
+
 df_prog_trkr_00 = dfs["df_progress_tracker"]
 print("df_prog_trkr_00: " + str(df_prog_trkr_00.shape))
-log_out(f"Import MySQL Reporter table: {str(df_reporter_00.shape)}")
-log_out(f"Import MySQL Awards table: {str(df_awards_00.shape)}")
 log_out(f"Import MySQL Progress Tracker table: {str(df_prog_trkr_00.shape)}")
+
+
+df_pi_emails_00 = dfs["df_pi_emails"]
+print("df_pi_emails_00: " + str(df_pi_emails_00.shape))
+log_out(f"Import MySQL PI Emails table: {str(df_pi_emails_00.shape)}")
+
+
+# 1. Import latest MySQL data ----- */
+datasets = [
+    "research_networks"
+]
+
+dfs = {}  # dictionary to hold your dataframes
+
+for name in datasets:
+    csv_file = out / f"{name}_{today}.csv"
+
+    # read CSV with all columns as strings
+    # df = pd.read_csv(csv_file, dtype=str)
+    df = pd.read_csv(
+    csv_file,
+    # sep=';',                # Semicolon delimiter
+    engine='python',        # Use Python engine for complex parsing
+    # quoting=3,              # QUOTE_NONE, avoids treating quotes specially
+    encoding='cp1252',
+    dtype=str,
+    on_bad_lines='warn'   # Skip problematic lines (optional)
+    )
+    # replace line breaks inside cells with a space
+    # and trim whitespace on all string columns
+    for col in df.select_dtypes(include="object").columns:
+        df[col] = (
+            df[col]
+            .str.replace(r"[\r\n]+", " ", regex=True)
+            .str.strip()
+        )
+
+    # sort by appl_id (if that column exists)
+    if "appl_id" in df.columns:
+        df = df.sort_values("appl_id")
+
+   # store clean DataFrame under a key
+    dfs[f"df_{name}"] = df.copy()
+
+   
+# Drops record where appl_id is missing
+df_res_net_00 = dfs["df_research_networks"].dropna(subset=['appl_id'])
+print("df_res_net_00: " + str(df_res_net_00.shape))
+log_out(f"Import MySQL Research Network table: {str(df_res_net_00.shape)}")
+
 
 # Write MySQL Tables to Worksheets
 # wb_dataflow = f"{out}/Dataflow_{today}.xlsx"
@@ -168,18 +216,23 @@ log_out(f"Import MySQL Progress Tracker table: {str(df_prog_trkr_00.shape)}")
 # 2. Prepare progress_tracker to merge ----- */
 
 df_prog_trkr_01 = df_prog_trkr_00.copy()
-# reorder columns so appl_id comes first
-if "appl_id" in df_prog_trkr_01.columns:
-    cols = ["appl_id"] + [c for c in df_prog_trkr_01.columns if c != "appl_id"]
-    df_prog_trkr_01 = df_prog_trkr_01[cols]
 
-# drop rows where appl_id is blank (empty string) 
-df_prog_trkr_01 = df_prog_trkr_01[
-    (df_prog_trkr_01["appl_id"].astype(str).str.strip() != "") 
-]
+# 2. Reorder columns (equivalent to 'order')
+# This moves 'appl_id' to the first position
+cols = ['appl_id'] + [c for c in df_prog_trkr_01.columns if c != 'appl_id']
+df_prog_trkr_01 = df_prog_trkr_01[cols]
 
+# 3. Drop rows with empty appl_id (equivalent to 'drop if')
+# This handles both actual empty strings and NaN/None values
+df_prog_trkr_01 = df_prog_trkr_01[df_prog_trkr_01['appl_id'].astype(str).str.strip() != ""]
+df_prog_trkr_01 = df_prog_trkr_01.dropna(subset=['appl_id'])
+
+# 4. Identify and flag bad values (equivalent to 'gen')
+df_prog_trkr_01['mds_flag_bad_projnum'] = 0
 print("df_prog_trkr_01: " + str(df_prog_trkr_01.shape))
 log_out(f"Progress Tracker table after dropping records where appl_id is blank: {str(df_prog_trkr_01.shape)}")
+# df_prog_trkr_01.to_csv(os.path.join(out, f'df_prog_trkr_01.csv'), index=False, quoting=1)
+
 
 
 # * -- CTN Protocols -- *;
@@ -187,449 +240,222 @@ log_out(f"Progress Tracker table after dropping records where appl_id is blank: 
 # * Remove CTN values from appl_id and project_num fields *;
 df_prog_trkr_02 = df_prog_trkr_01.copy()
 
-# 1) Create CTN flag: True where project_num starts with "CTN"
-df_prog_trkr_02["mds_ctn_flag"] = df_prog_trkr_02["project_num"].str.startswith("CTN", na=False)  # pandas str.startswith for prefix match :contentReference[oaicite:0]{index=0}
 
-# mds_ctn_flag counts and normalized percentages
-counts = df_prog_trkr_02['mds_ctn_flag'].value_counts()
-percent = df_prog_trkr_02['mds_ctn_flag'].value_counts(normalize=True) * 100
+# gen mds_ctn_flag = regexm(project_num, "^CTN")
+df_prog_trkr_02['mds_ctn_flag'] = df_prog_trkr_02['project_num'].str.contains('^CTN', regex=True, na=False).astype(int)
 
-# Combine into a single "Frequency" table
-freq_table = pd.concat([counts, percent], axis=1, keys=['Frequency', 'Percent'])
-print(freq_table)
+# gen mds_ctn_number = project_num if mds_ctn_flag == 1
+df_prog_trkr_02['mds_ctn_number'] = np.where(df_prog_trkr_02['mds_ctn_flag'] == 1, df_prog_trkr_02['project_num'], None)
 
-log_out(f"Progress Tracker Frequency of 'mds_ctn_flag':")
-log_out(f"{str(freq_table)}")
-        
+# replace project_num="" and appl_id="" if mds_ctn_flag == 1
+df_prog_trkr_02.loc[df_prog_trkr_02['mds_ctn_flag'] == 1, ['project_num', 'appl_id']] = ""
 
 
+# --- Other entities (Bad project numbers) ---
+# Stata 'sieve' logic: count dashes
+df_prog_trkr_02['num_dashes'] = df_prog_trkr_02['project_num'].str.count('-')
 
-# 2) Store CTN project number only for flagged rows
-df_prog_trkr_02["mds_ctn_number"] = df_prog_trkr_02["project_num"].where(df_prog_trkr_02["mds_ctn_flag"], None)
+# replace mds_flag_bad_projnum=1 if num_dashes > 1
+df_prog_trkr_02.loc[df_prog_trkr_02['num_dashes'] > 1, 'mds_flag_bad_projnum'] = 1
 
-# 3) Blank out project_num and appl_id for flagged rows
-df_prog_trkr_02.loc[df_prog_trkr_02["mds_ctn_flag"], "project_num"] = ""
-df_prog_trkr_02.loc[df_prog_trkr_02["mds_ctn_flag"], "appl_id"] = ""
+# gen mds_bad_projnum = project_num if num_dashes > 1
+df_prog_trkr_02['mds_bad_projnum'] = np.where(df_prog_trkr_02['num_dashes'] > 1, df_prog_trkr_02['project_num'], None)
+
+# ICPSR data deposits
+df_prog_trkr_02.loc[df_prog_trkr_02['project_num'].str.startswith('ICPSR', na=False), 'mds_flag_bad_projnum'] = 1
+
+# Cleanup temp columns
+df_prog_trkr_02 = df_prog_trkr_02.drop(columns=['num_dashes'])
+
+
+# --- Count number of hdp_ids for a given appl_id ---
+# by appl_id: egen num_hdp_by_appl = count(hdp_id)
+# Note: In pandas, count() ignores NaNs automatically
+df_prog_trkr_02['num_hdp_by_appl'] = df_prog_trkr_02.groupby('appl_id')['hdp_id'].transform('count')
+
+# Handle specific replacements for num_hdp_by_appl
+df_prog_trkr_02.loc[df_prog_trkr_02['appl_id'] == "0", 'num_hdp_by_appl'] = 0
+df_prog_trkr_02.loc[df_prog_trkr_02['appl_id'] == "", 'num_hdp_by_appl'] = np.nan
+
+
+# --- Entity type ---
+df_prog_trkr_02['entity_type'] = "Study"
+df_prog_trkr_02.loc[df_prog_trkr_02['mds_ctn_flag'] == 1, 'entity_type'] = "CTN"
+df_prog_trkr_02.loc[df_prog_trkr_02['mds_flag_bad_projnum'] == 1, 'entity_type'] = "Other"
+df_prog_trkr_02.loc[(df_prog_trkr_02['appl_id'] == "0") & (df_prog_trkr_02['mds_ctn_flag'] != 1), 'entity_type'] = "Other"
+
+
+# --- Final Cleanup & Save ---
+df_prog_trkr_02.loc[df_prog_trkr_02['appl_id'] == "0", 'appl_id'] = ""
+
+df_prog_trkr_02.to_csv(os.path.join(out, f'progress_tracker_{today}.csv'), index=False, quoting=1)
 
 print("df_prog_trkr_02: " + str(df_prog_trkr_02.shape))
-
-# Usage
 log_out(f"df_prog_trkr_02: {df_prog_trkr_02.shape}")
-
-# * -- Project numbers -- *;
-
-# * Split project_num into components needed for xstudy_id *;
-# foreach var in project_num {
-# replace xproject_num="" if num_dashes>1 /*n=6 changes made*/ 
-# 	* Identify and flag bad values of project_num*;
-# 	* If an underscore was inserted, remove it and everything that follows it *;
-df_prog_trkr_03 = df_prog_trkr_02.copy()
-
-# ————————————————————————
-# 1) Create working copy of project_num
-# ————————————————————————
-df_prog_trkr_03["xproject_num"] = df_prog_trkr_03["project_num"]
-
-# ————————————————————————
-# 2) Sieve out characters to count dashes
-# (remove everything except dashes)
-df_prog_trkr_03["sieved_project_num"] = df_prog_trkr_03["project_num"].str.replace(r"[^-]", "", regex=True)
-
-# Count length of sieved string (trim whitespace)
-df_prog_trkr_03["num_dashes"] = df_prog_trkr_03["sieved_project_num"].str.strip().str.len()
-
-# ————————————————————————
-# 3) Flag bad project numbers (num_dashes > 1)
-df_prog_trkr_03["mds_flag_bad_projnum"] = (df_prog_trkr_03["num_dashes"] > 1).astype(int)
-df_prog_trkr_03["mds_bad_projnum"] = df_prog_trkr_03["project_num"].where(df_prog_trkr_03["num_dashes"] > 1, None)
-
-# If more than 1 dash, blank out original in working copy
-df_prog_trkr_03.loc[df_prog_trkr_03["num_dashes"] > 1, "xproject_num"] = ""
-
-# ————————————————————————
-# 4) Remove underscores and everything after (if any)
-df_prog_trkr_03["xproject_num"] = df_prog_trkr_03["xproject_num"].str.replace(r"\_.*", "", regex=True)
-
-# ————————————————————————
-# 5) Parse components
-# proj_num_spl_ty_code = first character
-df_prog_trkr_03["proj_num_spl_ty_code"] = df_prog_trkr_03["xproject_num"].str[0:1]
-
-# proj_num_spl_act_code = next 3 characters
-df_prog_trkr_03["proj_num_spl_act_code"] = df_prog_trkr_03["xproject_num"].str[1:4]
-
-# proj_ser_num = next 4 characters
-df_prog_trkr_03["proj_ser_num"] = df_prog_trkr_03["xproject_num"].str[4:8]
-
-# ————————————————————————
-# 6) Split xproject_num on dashes into parts
-split_cols = df_prog_trkr_03["xproject_num"].str.split("-", expand=True)
-
-# drop the first element of the split (like drop xproject_num1 in Stata)
-# then take the second element of split as `proj_nm_spl_supp_yr`
-# which is at index 1 in pandas because it’s 0-based
-df_prog_trkr_03["proj_nm_spl_supp_yr"] = split_cols[1].fillna("")
-
-# suffix code = substr from position 3 onward
-df_prog_trkr_03["proj_num_spl_sfx_code"] = df_prog_trkr_03["proj_nm_spl_supp_yr"].str[2:]
-
-# ————————————————————————
-# 7) Add `mds_` prefix to match your Stata variable names
-df_prog_trkr_03.rename(
-    columns={
-        "proj_num_spl_ty_code": "mds_proj_num_spl_ty_code",
-        "proj_num_spl_act_code": "mds_proj_num_spl_act_code",
-        "proj_ser_num": "mds_proj_ser_num",
-        "proj_nm_spl_supp_yr": "mds_proj_nm_spl_supp_yr",
-        "proj_num_spl_sfx_code": "mds_proj_num_spl_sfx_code",
-    },
-    inplace=True,
-)
-
-# Optional cleanup of intermediate columns
-df_prog_trkr_03.drop(columns=["sieved_project_num", "num_dashes"], inplace=True)
-
-print("df_prog_trkr_03: " + str(df_prog_trkr_03.shape))
-log_out(f"df_prog_trkr_03: {df_prog_trkr_03.shape}")
-
-# * Count number of hdp_ids for a given appl_id *;
-# 	/*Note: 2024-10-09: there are only 8 appl_ids that have >1 HDP_ID associated, and the max number of HDP_IDs associated is 3. This excludes CTN records where appl_id==.*/
-df_prog_trkr_04 = df_prog_trkr_03.copy()
-
-# 1) count number of hdp_id values per appl_id
-num_hdp = (
-    df_prog_trkr_04[df_prog_trkr_04["appl_id"].astype(str).str.strip() != ""]  # ignore blank appl_ids
-    .groupby("appl_id")["hdp_id"]
-    .count()
-    .rename("num_hdp_by_appl")
-)
-
-# 2) merge that count back into the main DataFrame
-df_prog_trkr_04 = df_prog_trkr_04.merge(num_hdp, on="appl_id", how="left")
-
-# 3) rows with blank appl_id → keep count as NaN
-mask_blank_appl = df_prog_trkr_04["appl_id"].astype(str).str.strip() == ""
-df_prog_trkr_04.loc[mask_blank_appl, "num_hdp_by_appl"] = pd.NA
-
-# 4) rows not found in grouping get 0
-df_prog_trkr_04["num_hdp_by_appl"] = df_prog_trkr_04["num_hdp_by_appl"].fillna(0).astype(int)
-
-print("df_prog_trkr_04: " + str(df_prog_trkr_04.shape))
-log_out(f"df_prog_trkr_04: Count number of hdp_ids for a given appl_id {df_prog_trkr_04.shape}")
+# df_prog_trkr_02.to_csv(os.path.join(out, f'df_prog_trkr_02.csv'), index=False, quoting=1)
 
 
-# * Save prepped data *;
-df_prog_trkr_05 = df_prog_trkr_04.copy()
 
 
-# 1) Drop the helper columns
-df_prog_trkr_05 = df_prog_trkr_05.drop(columns=["sievedproject_num", "num_dashes", "xproject_num"], errors="ignore")
-
-# 2) Save to CSV
-temp = Path(r"\\rtpnfil03\NPTB2\EDC\Migrated\HEAL\Temp")  # replace with your temp folder path
-output_file = temp / f"progress_tracker_{today}.csv"
-
-df_prog_trkr_05.to_csv(output_file, index=False)
-
-print(f"Saved prepped data to {output_file}")
-
-print("df_prog_trkr_05: " + str(df_prog_trkr_05.shape))
-log_out(f"df_prog_trkr_05: Drops helper vars and saves to 'progress_tracker_today.csv' {df_prog_trkr_05.shape}")
-# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-#     # 3. Write your DataFrame directly
-#     df_prog_trkr_05.to_excel(writer, sheet_name='progress_tracker_today', index=False)
-
-# /* ----- 3. Merge data ----- */
-# * Merge awards reporter *;
-
-# Make local copies so we don’t modify originals
-df_reporter_01 = df_reporter_00.copy()
+# /* ----- 3. Clean awards table data ----- */
+# * Note: This step may not be needed if the awards table is not altered during export from MySQL. Sabrina had issues of NULL/missing values being set to 0 during export. As a quick check, note that the value of nih_foa_heal_lang and of nih_noa_heal_lang should be NULL in a majority of records, since NIH has only indicated values of these variables in the 2024 and 2025 new awards lists. *;
 df_awards_01 = df_awards_00.copy()
 
-# —————————————————————————————
-# 2) Drop rows where appl_id is blank
-df_reporter_01 = df_reporter_01[
-    (df_reporter_01["appl_id"].notna()) & 
-    (df_reporter_01["appl_id"].astype(str).str.strip() != "")
-].copy()
+# drop if appl_id==""
+df_awards_01 = df_awards_01[df_awards_01['appl_id'].astype(str).str.strip() != ""]
 
+# Standardize empty strings to "NULL" and rename (prep for merge)
+# rename nih_`acr'_heal_lang xnih_`acr'_heal_lang
+for acr in ['foa', 'noa']:
+    col = f'nih_{acr}_heal_lang'
+    df_awards_01.loc[df_awards_01[col].isna() | (df_awards_01[col] == ""), col] = "NULL"
+    df_awards_01 = df_awards_01.rename(columns={col: f'x{col}'})
 
-df_awards_01 = df_awards_01[
-    (df_awards_01["appl_id"].notna()) & 
-    (df_awards_01["appl_id"].astype(str).str.strip() != "")
-].copy()
-print("df_reporter_01: " + str(df_reporter_01.shape))
-print("df_awards_01: " + str(df_awards_01.shape))
-
-log_out(f"df_reporter_01: Drops records where appl_id is blank {df_reporter_01.shape}")
-log_out(f"df_awards_01: Drops records where appl_id is blank {df_awards_01.shape}")
-
-
-# —————————————————————————————
-# 3) Merge 1:1 on appl_id with indicator
-df_nihtables_00 = pd.merge(
-    df_reporter_01,
-    df_awards_01,
-    how="outer",
-    on="appl_id",
-    indicator="merge_reporter_awards"
+# Merge with correct values
+#Look to improve Awards table to generate the correct foanoa values automatically
+# merge 1:1 appl_id using ... keepusing(...)
+df_correct = pd.read_csv(
+    inp / "correct_foanoa_values.csv", 
+    dtype=str,
+    usecols=['appl_id', 'nih_foa_heal_lang', 'nih_noa_heal_lang']
 )
 
-# —————————————————————————————
-# 4) Drop rows where appl_id is blank after merge
-df_nihtables_00 = df_nihtables_00[
-    (df_nihtables_00["appl_id"].notna()) & 
-    (df_nihtables_00["appl_id"].astype(str).str.strip() != "")
-].copy()
+# df_correct = pd.read_stata(inp / "correct_foanoa_values.csv", columns=['appl_id', 'nih_foa_heal_lang', 'nih_noa_heal_lang'])
+df_awards_01 = pd.merge(df_awards_01, df_correct, on='appl_id', how='left', indicator=True)
 
-print("df_nihtables_00: " + str(df_nihtables_00.shape))
-log_out(f"df_nihtables_00: Outer Join on appl_id (df_reporter_01,df_awards_01) {df_nihtables_00.shape}")
+# drop if _merge==2 (Keep only matches and master-only records)
+df_awards_01 = df_awards_01[df_awards_01['_merge'] != 'right_only']
 
+# Cleanup: drop _merge and the renamed old columns (x*)
+df_awards_01 = df_awards_01.drop(columns=['_merge'] + [c for c in df_awards_01.columns if c.startswith('xnih_')])
 
+# Ensure the newly merged columns also use "NULL" for missing values
+for acr in ['foa', 'noa']:
+    col = f'nih_{acr}_heal_lang'
+    df_awards_01.loc[df_awards_01[col].isna() | (df_awards_01[col] == ""), col] = "NULL"
 
-# —————————————————————————————
-# 5) Convert indicator text to numeric codes (1/2/3) like Stata
-indicator_map = {
-    "left_only": 1,   # In reporter only
-    "right_only": 2,  # In awards only
-    "both": 3         # In both
-}
+# order nih_noa_notes, last
+cols = [c for c in df_awards_01.columns if c != 'nih_noa_notes'] + ['nih_noa_notes']
+df_awards_01 = df_awards_01[cols]
 
-df_nihtables_00["merge_reporter_awards"] = df_nihtables_00["merge_reporter_awards"].map(indicator_map)
+# Save
+# df_awards_01.to_csv(os.path.join(out, f'awards_{today}.csv'), index=False, quoting=1)
 
-# merge_reporter_awards counts and normalized percentages
-counts = df_nihtables_00['merge_reporter_awards'].value_counts()
-percent = df_nihtables_00['merge_reporter_awards'].value_counts(normalize=True) * 100
-
-# Combine into a single "Frequency" table
-freq_table = pd.concat([counts, percent], axis=1, keys=['Frequency', 'Percent'])
-print(freq_table)
-
-log_out(f"df_nihtables_00 Frequency of 'merge_reporter_awards':")
-log_out(f"{str(freq_table)}")
-
-
-
-# —————————————————————————————
-# 6) Save result (CSV or Stata)
-df_nihtables_00.to_csv(temp / f"nihtables_{today}.csv", index=False)
-log_out(f"df_reporter_01: ' {df_reporter_01.shape}")
-log_out(f"df_awards_01: ' {df_awards_01.shape}")
-log_out(f"df_nihtables_00: Saves to 'nihtables_today.csv' {df_nihtables_00.shape}")
-
-
-print("df_reporter_01: " + str(df_reporter_01.shape))
 print("df_awards_01: " + str(df_awards_01.shape))
-print("df_nihtables_00: " + str(df_nihtables_00.shape))
-
-df_nihtables_noabs=df_nihtables_00.drop(columns=['proj_abs'], inplace=False)
-
-# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-#     # 3. Write your DataFrame directly
-#     df_nihtables_noabs.to_excel(writer, sheet_name='nihtables_today', index=False)
+log_out(f"df_awards_01: {df_awards_01.shape}")
+# df_awards_01.to_csv(os.path.join(out, f'df_awards_01.csv'), index=False, quoting=1)
 
 
+# /* ----- 4. Merge data ----- */
+# * Merge awards reporter *;
+df_reporter_01 = df_reporter_00[df_reporter_00['appl_id'].astype(str).str.strip() != ""]
+# df_awards_01 = df_awards_00.copy()
+df_res_net_01 = df_res_net_00.copy()
 
-# * Merge MDS data (via progress_tracker) *;
+# merge 1:1 appl_id
+df_nihtables = pd.merge(df_reporter_01, df_awards_01, on='appl_id', how='outer', indicator='merge_reporter_awards')
 
-# copy so we don’t modify originals
-df_nihtables_01 = df_nihtables_00.copy()
-df_prog_trkr_06 = df_prog_trkr_05.copy()
+# drop if appl_id=="" (already handled, but good for safety)
+df_nihtables = df_nihtables[df_nihtables['appl_id'].astype(str).str.strip() != ""]
 
-# merge 1:m on appl_id with merge indicator
-df_dataset_00 = pd.merge(
-    df_nihtables_01,
-    df_prog_trkr_06,
-    on="appl_id",
-    how="outer",              # outer keeps all rows from both
-    indicator="merge_awards_mds"
-)
-
-# map indicator to Stata numeric codes
-indicator_map = {
-    "left_only": "1. MySQL only",    # In MySQL only
-    "right_only": "2. MDS only",   # In MDS only
-    "both": "3. MySQL and MDS"          # In both databases
+# Replicate Stata labels (for documentation/clarity)
+merge_map_awrep = {
+    'left_only': "In reporter only",   # _merge == 1
+    'right_only': "In awards only",    # _merge == 2
+    'both': "In both tables"           # _merge == 3
 }
-
-df_dataset_00["merge_awards_mds"] = df_dataset_00["merge_awards_mds"].map(indicator_map)
-
-# merge_awards_mds counts and normalized percentages
-counts = df_dataset_00['merge_awards_mds'].value_counts()
-percent = df_dataset_00['merge_awards_mds'].value_counts(normalize=True) * 100
-
-# Combine into a single "Frequency" table
-freq_table = pd.concat([counts, percent], axis=1, keys=['Frequency', 'Percent'])
-print(freq_table)
-
-log_out(f"df_dataset_00 Frequency of 'merge_awards_mds':")
-log_out(f"{str(freq_table)}")
+df_nihtables['merge_reporter_awards'] = df_nihtables['merge_reporter_awards'].map(merge_map_awrep)
+df_nihtables.to_csv(os.path.join(out, f'nihtables_{today}.csv'), index=False, quoting=1)
 
 
+# --- 2. Merge progress_tracker table ---
+df_prog_trkr_03 = df_prog_trkr_02.copy()
 
 
-# now df_merged matches Stata
-# (you can also add labels or comments for documentation)
+# merge 1:m appl_id
+df_dataset = pd.merge(df_nihtables, df_prog_trkr_03, on='appl_id', how='outer', indicator='merge_awards_mds')
 
-# save to Stata or CSV
-df_dataset_00.to_csv(temp / f"dataset_{today}.csv", index=False)
+merge_map_sqlmds = {
+    'left_only': "In MySQL only",
+    'right_only': "In MDS only",
+    'both': "In both databases"
+}
+df_dataset['merge_awards_mds'] = df_dataset['merge_awards_mds'].map(merge_map_sqlmds)
 
-log_out(f"df_prog_trkr_06: ' {df_prog_trkr_06.shape}")
-log_out(f"df_nihtables_01: ' {df_nihtables_01.shape}")
-log_out(f"df_dataset_00: Outer join on appl_id (df_prog_trkr_06,df_nihtables_01) and saves to 'dataset_today.csv' {df_dataset_00.shape}")
-
-print("df_nihtables_01: " + str(df_nihtables_01.shape))
-print("df_prog_trkr_06: " + str(df_prog_trkr_06.shape))
-print("df_dataset_00: " + str(df_dataset_00.shape))
-
-df_dataset_00_noabs=df_dataset_00.drop(columns=['proj_abs'], inplace=False)
-
-# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-#     # 3. Write your DataFrame directly
-#     df_dataset_00_noabs.to_excel(writer, sheet_name='dataset_today', index=False)
+print("df_dataset: " + str(df_dataset.shape))
+log_out(f"df_dataset: {df_dataset.shape}")
+# df_dataset.to_csv(os.path.join(out, f'df_dataset.csv'), index=False, quoting=1)
 
 
+# --- 3. Merge research_networks table ---
+
+# merge m:1 appl_id
+df_dataset2 = pd.merge(df_dataset, df_res_net_01, on='appl_id', how='left', indicator='_merge')
+
+# drop if _merge==2 (Keep only data from the main dataset)
+df_dataset2 = df_dataset2[df_dataset2['_merge'] != 'right_only']
+
+# Cleanup and logic updates
+df_dataset2 = df_dataset2.drop(columns=['_merge', 'res_net_override_flag'])
+
+# replace res_net=upper(res_net)
+df_dataset2['res_net'] = df_dataset2['res_net'].str.upper()
+
+# replace entity_type logic
+df_dataset2.loc[df_dataset2['res_net'] == "CTN", 'entity_type'] = "CTN"
+df_dataset2['entity_type'] = df_dataset2['entity_type'].replace("", "Study").fillna("Study")
 
 
-# /* ----- 4. Clean merged data ----- */
-# 	/* Note: subproj_id is not available in the MDS data */ /*n=2 and n=0 real changes made*/
+# Save
+# df_dataset2.to_csv(os.path.join(out, f'dataset2_{today}.csv'), index=False, quoting=1)
 
-# Make local copies so we don’t modify originals
-df_dataset_01 = df_dataset_00.copy()
+print("df_dataset2: " + str(df_dataset2.shape))
+log_out(f"df_dataset2: {df_dataset2.shape}")
+# df_dataset2.to_csv(os.path.join(out, f'df_dataset2.csv'), index=False, quoting=1)
 
-# Replace blank or whitespace only for proj_ser_num
-df_dataset_01.loc[
-    df_dataset_01["proj_ser_num"].str.strip().eq(""),
-    "proj_ser_num"
-] = df_dataset_01.loc[
-    df_dataset_01["proj_ser_num"].str.strip().eq(""),
-    "mds_proj_ser_num"
-]
+# /* ----- 5. Clean merged data ----- */
 
-# Replace blank or whitespace only for proj_num_spl_sfx_code
-df_dataset_01.loc[
-    df_dataset_01["proj_num_spl_sfx_code"].str.strip().eq(""),
-    "proj_num_spl_sfx_code"
-] = df_dataset_01.loc[
-    df_dataset_01["proj_num_spl_sfx_code"].str.strip().eq(""),
-    "mds_proj_num_spl_sfx_code"
-]
+mysql_today_00 = df_dataset2.copy()
 
+# --- 1. Flag supplement awards ---
+# gen xsupp_flag=substr(proj_num,-2,1)
+# gen supplement_flag=1 if xsupp_flag=="S"
+mysql_today_00['supplement_flag'] = np.where(mysql_today_00['proj_num'].str[-2:-1] == "S", 1, np.nan)
 
-print("df_dataset_01: " + str(df_dataset_01.shape))
-log_out(f"df_dataset_01: replaced blank/whitespace for proj_ser_num and proj_num_spl_sfx_code' {df_dataset_01.shape}")
+# --- 2. Dates ---
+# destring fisc_yr, replace
+mysql_today_00['fisc_yr'] = pd.to_numeric(mysql_today_00['fisc_yr'], errors='coerce')
 
-# * Flag supplement awards *;
+date_vars = ['awd_not_date', 'bgt_end', 'bgt_strt', 'proj_end_date', 'proj_strt_date']
 
-# Make local copies so we don’t modify originals
-df_dataset_02 = df_dataset_01.copy()
-
-# —————————————————————————————
-# 1) Flag supplement awards
-# —————————————————————————————
-
-# get the second‑to‑last character of proj_num (like Stata substr at -2,1)
-df_dataset_02["xsupp_flag"] = df_dataset_02["proj_num"].str[-2:-1]
-
-# flag where that equals "S"
-df_dataset_02["supplement_flag"] = (df_dataset_02["xsupp_flag"] == "S").astype(int)
-
-# drop the helper
-df_dataset_02.drop(columns=["xsupp_flag"], inplace=True)
-print("df_dataset_02: " + str(df_dataset_02.shape))
-log_out(f"df_dataset_02: create supplement flag where proj_num has S in second to last char' {df_dataset_02.shape}")
-
-# merge_awards_mds counts and normalized percentages
-counts = df_dataset_02['supplement_flag'].value_counts()
-percent = df_dataset_02['supplement_flag'].value_counts(normalize=True) * 100
-
-# Combine into a single "Frequency" table
-freq_table = pd.concat([counts, percent], axis=1, keys=['Frequency', 'Percent'])
-print(freq_table)
-log_out(f"df_dataset_02 Frequency of 'supplement_flag':")
-log_out(f"{str(freq_table)}")
-
-# —————————————————————————————
-# 2) Convert dates
-# —————————————————————————————
-
-# ensure fiscal year numeric
-df_dataset_02["fisc_yr"] = pd.to_numeric(df_dataset_02["fisc_yr"], errors="coerce")
-
-# parse the string date columns into real pandas datetime
-for var in ["bgt_end", "proj_end_date"]:
-    # extract the first 10 characters
-    df_dataset_02[f"x{var}"] = df_dataset_02[var].astype(str).str[:10]
-
-    # convert to datetime (pandas datetime)
-    df_dataset_02[f"{var}_date"] = pd.to_datetime(df_dataset_02[f"x{var}"], format="%Y-%m-%d", errors="coerce")
-
-    # drop the intermediate
-    df_dataset_02.drop(columns=[f"x{var}"], inplace=True)
-
-    # (Optional) reorder columns to come after the original
-    cols = list(df_dataset_02.columns)
-    if f"{var}_date" in cols:
-        cols.remove(f"{var}_date")
-        insert_at = cols.index(var) + 1 if var in cols else len(cols)
-        cols.insert(insert_at, f"{var}_date")
-        df_dataset_02 = df_dataset_02[cols]
-
-    # label for clarity (not necessary in pandas storage)
-    df_dataset_02[f"{var}_date"].attrs["label"] = "Python datetime format"
-
-# —————————————————————————————
-# 3) Entity type
-# —————————————————————————————
-
-# default
-df_dataset_02["entity_type"] = "Study"
-
-# override for CTN
-df_dataset_02.loc[df_dataset_02["mds_ctn_flag"] == 1, "entity_type"] = "CTN"
-
-# override for bad projnum
-df_dataset_02.loc[df_dataset_02["mds_flag_bad_projnum"] == 1, "entity_type"] = "Other"
-
-# —————————————————————————————
-# 4) Save result
-# —————————————————————————————
-
-# Make local copies so we don’t modify originals
-mysql_today = df_dataset_02.copy()
-
-mysql_today.to_csv(der / f"mysql_{today}.csv", index=False)
-
-print("mysql_today: " + str(mysql_today.shape))
-log_out(f"df_dataset_02: Create Entity type (Study, CTN, Other) and save to mysql_today.csv' {df_dataset_02.shape}")
-
-mysql_today_noabs=mysql_today.drop(columns=['proj_abs'], inplace=False)
-
-# List of columns you want at the beginning
-cols_to_front = ['merge_awards_mds', 'hdp_id', 'appl_id']
-
-# Reorder: Target columns + [all other columns if they are not in the target list]
-mysql_today_noabs = mysql_today_noabs[cols_to_front + [col for col in mysql_today_noabs.columns if col not in cols_to_front]]
-
-
-log_out(f"mysql_today_noabs: Copy of mysql_today, but without proj_abs field b/c of export issues with special char' {mysql_today_noabs.shape}")
-
-# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-#      # 2. Map the column to labels before writing
-#     # This replaces the values in 'merge_awards_mds' for the output only
-#     mysql_today_noabs['merge_awards_mds'] = mysql_today_noabs['merge_awards_mds'].map(indicator_map).fillna(mysql_today_noabs['merge_awards_mds'])
-#     # 3. Write your DataFrame directly
-#     mysql_today_noabs.to_excel(writer, sheet_name='mysql_today', index=False)
-
-# # Deletes "Sheet1"
-# # Open the file in append mode
-# with pd.ExcelWriter(wb_dataflow, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-#     # Access the openpyxl workbook object
-#     workbook = writer.book
+for var in date_vars:
+    # gen x`var'=substr(`var',1,10) & gen `var'_date=date(x`var',"YMD")
+    # pd.to_datetime handles the first 10 chars automatically if format is YYYY-MM-DD
+    new_col = f'{var}_date'
+    mysql_today_00[new_col] = pd.to_datetime(mysql_today_00[var].astype(str).str[:10], errors='coerce')
     
-#     # Check if the sheet exists and delete it
-#     if 'Sheet1' in workbook.sheetnames:
-#         del workbook['Sheet1']
+    # Reorder: order `var'_date, after(`var')
+    current_cols = list(mysql_today_00.columns)
+    var_idx = current_cols.index(var)
+    current_cols.insert(var_idx + 1, current_cols.pop(current_cols.index(new_col)))
+    mysql_today_00 = mysql_today_00[current_cols]
+
+# --- 3. Compound Key ---
+# egen compound_key=concat(appl_id hdp_id), punct(_)
+# Convert to string first to ensure concatenation works correctly
+# mysql_today_00['compound_key'] = mysql_today_00['appl_id'].astype(str) + "_" + mysql_today_00['hdp_id'].astype(str)
+# This version avoids "nan" from appearing in missing hdp_ids
+mysql_today_00['compound_key'] = (
+    mysql_today_00['appl_id'].astype(str) + "_" + 
+    mysql_today_00['hdp_id'].fillna('').astype(str).str.replace(r'\.0$', '', regex=True)
+)
+
+
+# Save
+mysql_today_00.to_csv(os.path.join(out, f'mysql_{today}.csv'), index=False, quoting=1)
+
+print("mysql_today_00: " + str(mysql_today_00.shape))
+log_out(f"mysql_today_00: {mysql_today_00.shape}")
 
 
 # END HEAL_02_ImportMerge 

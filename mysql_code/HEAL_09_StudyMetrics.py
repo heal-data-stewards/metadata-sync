@@ -58,12 +58,12 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "2026-04-24"
+today = os.environ.get("today")
+
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
-
 # ----- 2. Filepaths ----- */
-dir = Path(r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL") #WINDOwS
+dir = Path(os.environ.get("dir"))
 inp = dir / "Input"
 out = dir / "Output"
 log = dir / "Log"
@@ -92,7 +92,6 @@ log_out(f"HEAL_09_StudyMetrics Log Run Date: {today}")
 log_out(f"HEAL_09_StudyMetrics")
 
 # /* ----- 0. Prepare standard dataset for metrics report ----- */
-
 
 mysql_00 = pd.read_csv(f"{out}/mysql_{today}.csv")
 log_out(f"mysql_00: Using mysql_today.csv' {mysql_00.shape}")
@@ -541,95 +540,8 @@ ws["C70"] = (df11["data_linked_on_platform"] == "No").sum()
 
 wb.save(f"{out}/StudyMetrics_{today}.xlsx")
 
-# freq_link_platf = (
-#     df11["data_linked_on_platform"]
-#     .value_counts(dropna=False)   # include missing like SAS
-#     .reset_index()
-# )
 
-# freq_link_platf.columns = ["data_linked_on_platform", 'count']
-
-
-# # Load the template (read_only=False to allow writing)  
-# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
- 
-# # Select the worksheet to write to (e.g., "Report")  
-# ws = wb["Metrics"]  # Replace with your sheet name  
-
-# start_row = 69  # Excel row number (A2 = row 5)  
-# start_col = 2  # Excel column number (A = column 1)
-
-# # Extract DataFrame values as a numpy array  
-# # freq_entity_type.columns = ['entity_type', 'count']
-
-# df_values = freq_link_platf.values  
-
-# # Iterate over rows and columns to write values  
-# for row_idx, row_data in enumerate(df_values):  
-#     for col_idx, value in enumerate(row_data):  
-#         # Calculate Excel cell coordinates (1-based)  
-#         excel_row = start_row + row_idx  
-#         excel_col = start_col + col_idx  
- 
-#         # Write only the value (preserves formatting)  
-#         ws.cell(row=excel_row, column=excel_col).value = value
-
-# wb.save(f"{out}/StudyMetrics_{today}.xlsx")
-
-
-
-
-
-# /* ----- 11. Other: MySQL entities and awards ----- */
-# asdoc, text(--------------11. Other: MySQL entities and awards--------------) fs(14), save($qc/StudyMetrics_$today.doc) append label
-
-# * Number of CTN protocols *;
-# use "$der/mysql_$today.dta", clear
-# keep if mds_ctn_flag==1
-# gen ctns=_n
-# label var ctns "Number of CTN Protocols"
-# asdoc sum ctns, statistics(max) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text(The number of CTN Protocols is determined by how many HDP IDs on Platform are records for a CTN Protocol.) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
-
-# * Number of MySQL studies *;
-# use "$der/study_lookup_table.dta", clear
-# destring xstudy_id, replace
-# label var xstudy_id "Number of MySQL studies"
-# asdoc sum xstudy_id, statistics(max) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text(The number of distinct studies tracked in the MySQL DB, where 'study' is defined by the HEAL Stewards. The number reported above is a count of unique values of xstudy_id.) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
-
-# * Number of awards in MySQL *;
-# use "$der/mysql_$today.dta", clear
-# drop if merge_awards_mds==2
-# keep appl_id
-# sort appl_id
-# drop if appl_id==""
-# duplicates drop
-# gen appls=_n
-# label var appls "Number of MySQL awards"
-# asdoc sum appls, statistics(max) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text(The number of awards tracked in the MySQL DB, where an award is defined as a unique NIH appl_id.) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text( ) save($qc/StudyMetrics_$today.doc) append label
-
-
-# * Awards in MySQL by entity type *;
-# use "$der/mysql_$today.dta", clear
-# label var entity_type "Entity Type"
-# drop if merge_awards_mds==2
-# keep appl_id entity_type
-# sort appl_id
-# duplicates drop
-# merge 1:1 appl_id using "$raw/research_networks_$today.dta"
-# replace entity_type="CTN Protocol" if res_net=="CTN"
-# asdoc tab entity_type, title(appl_ids by entity type) save($qc/StudyMetrics_$today.doc) append label
-# asdoc, text(This tabulation shows the number of awards belonging to each type of entity. Here, the number for CTN Protocol indicates the total number of appl_ids associated with any CTN Protocol numbers. The 'Other' entity type indicates 6 awards that do not have project serial numbers and appear to be contracts or other agreements - these 6 are listed out in the regular QC Report. Every other appl_id in the MySQL DB belongs to a Study, where 'study' is defined by the Stewards.) save($qc/StudyMetrics_$today.doc) append label
-
-
-
-
-# # 12. Other metrics C76 C78 C80 B83-----
+# 11. Other metrics C76 C78 C80 B83-----
 
 # Use df mysql_01 (initial ingest of mysql_today.csv file)
 
@@ -640,7 +552,7 @@ print("Number of CTN Protocols:", len(ctn))
 # MySQL studies
 # read CSV with all columns as strings
 studies = pd.read_csv(
-    f"{inp}/study_lookup_table.csv",
+    f"{out}/study_lookup_table.csv",
     sep=',',                # Semicolon delimiter
     engine='python',        # Use Python engine for complex parsing
     # quoting=3,              # QUOTE_NONE, avoids treating quotes specially
@@ -659,23 +571,26 @@ for col in studies.select_dtypes(include="object").columns:
 
 
 
-# studies["xstudy_id"] = pd.to_numeric(studies["xstudy_id"], errors="coerce")
+studies["xstudy_id"] = pd.to_numeric(studies["xstudy_id"], errors="coerce")
 
-# print("Number of MySQL studies:", studies["xstudy_id"].nunique())
+print("Number of MySQL studies:", studies["xstudy_id"].nunique())
 
 # MySQL awards
-awards_00 = mysql_01[mysql_01["merge_awards_mds"].astype(str).str[0] != '2']
-awards_01 = awards_00[awards_00["appl_id"] != ""]
+# awards_00 = mysql_01[mysql_01["merge_awards_mds"].astype(str).str[0] != '2']
+awards_00 = mysql_01[mysql_01["merge_awards_mds"] != "In MDS only"]
+awards_01 = awards_00[awards_00["appl_id"].notna()].sort_values(by="appl_id")
+
 # Select both columns, but only look at appl_id to find duplicates
-awards_02 = awards_01[["appl_id", "entity_type"]].drop_duplicates(subset=["appl_id"])
+awards_02 = awards_01[["appl_id", "entity_type","merge_awards_mds"]].drop_duplicates(subset=["appl_id"])
+# awards_02.to_csv(os.path.join(out, f'metric_11_mysql_awards.csv'), index=False, quoting=1)
 
 print("Number of MySQL awards:", len(awards_02))
 
-# # Load the template (read_only=False to allow writing)  
-# wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
+# Load the template (read_only=False to allow writing)  
+wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
  
-# # Select the worksheet to write to (e.g., "Report")  
-# ws = wb["Metrics"]  # Replace with your sheet name  
+# Select the worksheet to write to (e.g., "Report")  
+ws = wb["Metrics"]  # Replace with your sheet name  
 
 ws["C76"] = len(ctn)
 ws["C78"] = studies["xstudy_id"].nunique()
@@ -698,8 +613,7 @@ wb_filepath = f"{out}/StudyMetrics_{today}.xlsx"
 
 
 # Write source table to StudyMetrics Report for drill down purposes
-mysql_xlsx_00 = pd.read_csv(f"{out}/mysql_{today}.csv")
-mysql_xlsx_01 = mysql_xlsx_00.drop(columns='proj_abs')
+mysql_xlsx_01 = mysql_00.drop(columns='proj_abs')
 
 # Move 'col_C' and 'col_D' to the front
 target_cols = ['compound_key','appl_id', 'hdp_id','merge_awards_mds', 'merge_reporter_awards']
@@ -736,7 +650,6 @@ if "mysql_today" in wb.sheetnames:
     wb.save(wb_filepath)
 
     
-# # END HEAL_09_StudyMetrics
-    
-    
+# END HEAL_09_StudyMetrics
+
 

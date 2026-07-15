@@ -24,26 +24,6 @@
 # /* -------------------------------------------------------------------------------- */
 
 
-
-# /* ----- 1. Import documentation tables ----- */
-# foreach tab in ref_table value_overrides_byappl {
-# 	import excel using "$doc/HEAL_research_networks_ref_table_for_MySQL.xlsx", sheet("`tab'") firstrow /*case(upper)*/ allstring clear
-# 	foreach x of varlist * {
-# 		replace `x'=subinstr(`x', "`=char(10)'", "`=char(32)'", .) /* replace linebreaks inside cells with a space */
-# 		replace `x'=strtrim(`x')
-# 		replace `x'=stritrim(`x')
-# 		replace `x'=ustrtrim(`x')
-# 		}
-# 	missings dropvars * , force /* drop columns with no data */
-# 	missings dropobs * , force /* drop rows with no data */
-# 	save "$temp/`tab'.dta", replace
-# 	export delimited using "$doc/res_net_`tab'.csv", quote replace
-# 	}
-	
-# /* Manual step: Run the SQL script file "create_res_net_doc_tables". Then run the SQL script file "update_research_networks." Then export research_networks table from MySQL as a .csv so it can be read in in program 02. */
-
-
-
 # ----- Boiler Plate Code -----------------------------------------------------*/
 
 
@@ -62,11 +42,12 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "2026-04-24"
+today = os.environ.get("today")
+
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
 # ----- 2. Filepaths ----- */
-dir = Path(r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL") #WINDOwS
+dir = Path(os.environ.get("dir"))
 inp = dir / "Input"
 out = dir / "Output"
 log = dir / "Log"
@@ -140,7 +121,7 @@ datasets = [
 dfs = {}  # dictionary to hold your dataframes
 
 for name in datasets:
-    csv_file = inp / f"{name}_20260519.csv"
+    csv_file = inp / f"{name}_{today}.csv"
 
     # read CSV with all columns as strings
     # df = pd.read_csv(csv_file, dtype=str)
@@ -190,7 +171,7 @@ research_networks_00 = df_awards_00[['appl_id', 'res_prg']].copy()
 
 print("research_networks_00: " + str(research_networks_00.shape))
 log_out(f"research_networks table_00: {str(research_networks_00.shape)}")
-research_networks_00.to_csv(os.path.join(inp, f'research_networks_00.csv'), index=False, quoting=1)
+# research_networks_00.to_csv(os.path.join(inp, f'research_networks_00.csv'), index=False, quoting=1)
 
 
 # 2. Update res_net based on reference table (Left Join)
@@ -200,9 +181,9 @@ research_networks_01 = research_networks_01.merge(
     on='res_prg', 
     how='left'
 )
-research_networks_01.to_csv(os.path.join(inp, f'research_networks_01.csv'), index=False, quoting=1)
 print("research_networks_01: " + str(research_networks_01.shape))
 log_out(f"research_networks table_01: {str(research_networks_01.shape)}")
+# research_networks_01.to_csv(os.path.join(inp, f'research_networks_01.csv'), index=False, quoting=1)
 
 # 3. Drop res_prg column
 research_networks_01.drop(columns=['res_prg'], inplace=True)
@@ -221,14 +202,14 @@ research_networks_02 = research_networks_01.merge(
 
 print("research_networks_02: " + str(research_networks_02.shape))
 log_out(f"research_networks table_02: {str(research_networks_02.shape)}")
-research_networks_02.to_csv(os.path.join(inp, f'research_networks_02.csv'), index=False, quoting=1)
+# research_networks_02.to_csv(os.path.join(inp, f'research_networks_02.csv'), index=False, quoting=1)
 
 research_networks_03=research_networks_02.copy()
 research_networks_03['res_net'] = research_networks_03['res_net_override'].combine_first(research_networks_03['res_net'])
 
 print("research_networks_03: " + str(research_networks_03.shape))
 log_out(f"research_networks table_03: {str(research_networks_03.shape)}")
-research_networks_03.to_csv(os.path.join(inp, f'research_networks_03.csv'), index=False, quoting=1)
+# research_networks_03.to_csv(os.path.join(inp, f'research_networks_03.csv'), index=False, quoting=1)
 
 
 # 5. Update the override flag (1 if ID exists in override table, else 0)
@@ -242,7 +223,7 @@ research_networks_04.drop(columns=['res_net_override'], inplace=True)
 
 print("research_networks_04: " + str(research_networks_04.shape))
 log_out(f"research_networks table_04: {str(research_networks_04.shape)}")
-research_networks_04.to_csv(os.path.join(inp, f'research_networks_04.csv'), index=False, quoting=1)
+# research_networks_04.to_csv(os.path.join(inp, f'research_networks_04.csv'), index=False, quoting=1)
 
 
 research_networks_05=research_networks_04.copy()
@@ -253,10 +234,10 @@ print("research_networks_05: " + str(research_networks_05.shape))
 log_out(f"research_networks table_05: {str(research_networks_05.shape)}")
 
 # 6. Save outputs
-research_networks_05.to_csv(os.path.join(inp, f'research_networks_{today}.csv'), index=False, quoting=1)
+research_networks_05.to_csv(os.path.join(out, f'research_networks_{today}.csv'), index=False, quoting=1)
 
-print(f"Processed: exported research_networks_today.csv to Input")
-log_out(f"Exported research_networks table to Input\research_networks_{today}.csv")
+print(f"Processed: exported research_networks_today.csv to Input and Output")
+log_out(f"Exported research_networks table to Output\research_networks_{today}.csv")
 
 
 

@@ -43,12 +43,12 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "2026-04-24"
+today = os.environ.get("today")
+
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
-
 # ----- 2. Filepaths ----- */
-dir = Path(r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL") #WINDOwS
+dir = Path(os.environ.get("dir"))
 inp = dir / "Input"
 out = dir / "Output"
 log = dir / "Log"
@@ -69,29 +69,12 @@ log_out(f"HEAL_03_DQAudit Log Run Date: {today}")
 
 
 
-# /* ----- 1. Create key of appl_ids in MySQL ----- */
-
-# use "$temp/nihtables_$today.dta", clear
-# keep appl_id heal_funded proj_ser_num
-# merge 1:1 appl_id using "$raw/research_networks_$today.dta"
-# drop if _merge==2
-# duplicates drop
-# gen in_resnet=0
-# replace in_resnet=1 if strtrim(res_net)!=""
-# keep appl_id heal_funded res_net in_resnet proj_ser_num
-# rename proj_ser_num in_rep_table_sernum
-# save "$temp/mysql_applkey.dta", replace 
-
-
-
-
-
-
-
 
 # 1. Import CSV files ----- */
 datasets = [
-    "nihtables"
+    "nihtables",
+    "research_networks"
+
 ]
 
 dfs = {}  # dictionary to hold your dataframes
@@ -133,51 +116,12 @@ df_nihtables_00 = dfs["df_nihtables"]
 print("df_nihtables_00: " + str(df_nihtables_00.shape))
 log_out(f"Import {name}: {str(df_nihtables_00.shape)}")
 
-
-# 1. Import CSV files ----- */
-datasets = [
-    "research_networks"
-]
-
-dfs = {}  # dictionary to hold your dataframes
-
-for name in datasets:
-    csv_file = inp / f"{name}_{today}.csv"
-
-    # read CSV with all columns as strings
-    # df = pd.read_csv(csv_file, dtype=str)
-    df = pd.read_csv(
-    csv_file,
-    # sep=';',                # Semicolon delimiter
-    engine='python',        # Use Python engine for complex parsing
-    # quoting=3,              # QUOTE_NONE, avoids treating quotes specially
-    encoding='cp1252',
-    dtype=str,
-    on_bad_lines='warn'   # Skip problematic lines (optional)
-    )
-    # replace line breaks inside cells with a space
-    # and trim whitespace on all string columns
-    for col in df.select_dtypes(include="object").columns:
-        df[col] = (
-            df[col]
-            .str.replace(r"[\r\n]+", " ", regex=True)
-            .str.strip()
-        )
-
-    # sort by appl_id (if that column exists)
-    if "appl_id" in df.columns:
-        df = df.sort_values("appl_id")
-
-   # store clean DataFrame under a key
-    dfs[f"df_{name}"] = df.copy()
-
-   
-    
 # Load dfs
 df_res_net_00 = dfs["df_research_networks"]
 print("df_res_net_00: " + str(df_res_net_00.shape))
 log_out(f"Import {name}: {str(df_res_net_00.shape)}")
 
+ 
 
 df_nihtables_01 = df_nihtables_00[["appl_id", "heal_funded", "proj_ser_num"]]
 
@@ -438,7 +382,9 @@ df_merged.to_csv(os.path.join(out, f'final_heal_awards_by_serial_number_{today}_
 
 # Define paths and columns (replaces Stata globals)
 # Replace these list elements with your actual column names from $stewards_id_vars
-stewards_id_vars = ["cr_pro_num", "act_code"]  # Example variables
+# stewards_id_vars = ["cr_pro_num", "act_code"]  # Example variables
+stewards_id_vars = ["proj_ser_num", "subproj_id", "proj_num_spl_sfx_code"]  # Example variables
+
 # newer_appls_dta_path = "$temp/newer_appls_related_to_studies.dta"
 # newer_appls_xlsx_path = "$temp/newer_appls_related_to_studies.xlsx"
 
