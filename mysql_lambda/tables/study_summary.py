@@ -48,6 +48,8 @@ RENAME_DICT = {
     "time_of_registration":   "Platform Reg Time",
     "overall_percent_complete": "CEDAR Form %",
     "repository_name":        "Repo per Platform",
+    "repository_study_link":  "Repo Study Link",
+    "repository_metadata":    "Repo List",
     "archived":               "Archived",
     "heal_funded":            "HEAL-Related",
     "do_not_engage":          "Do not Engage",
@@ -69,6 +71,8 @@ RENAME_DICT_MDS = {
     "time_of_registration":   "Platform Reg Time",
     "overall_percent_complete": "CEDAR Form %",
     "repository_name":        "Repo per Platform",
+    "repository_study_link":  "Repo Study Link",
+    "repository_metadata":    "Repo List",
     "archived":               "Archived",
 }
 
@@ -85,6 +89,8 @@ RENAME_DICT_CTN = {
     "time_of_registration":   "Platform Reg Time",
     "overall_percent_complete": "CEDAR Form %",
     "repository_name":        "Repo per Platform",
+    "repository_study_link":  "Repo Study Link",
+    "repository_metadata":    "Repo List",
     "archived":               "Archived",
 }
 

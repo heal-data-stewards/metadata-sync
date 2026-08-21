@@ -11,6 +11,7 @@ in tables/study_summary.py. Key mappings relevant here:
   study_hdp_id, study_most_recent_appl are passed through unchanged.
 """
 
+import ast
 import logging
 import os
 
@@ -77,24 +78,72 @@ def ended_studies(conn, table=_TABLE, before=None, **kwargs):
     return {"query": "ended_studies", "results": rows}
 
 
+def _parse_repo_list(raw):
+    """
+    Parse the `repo_list` column: a Python-repr'd list of repository dicts
+    (single-quoted, not JSON) written by mds_data_prep.py's `repository_metadata`
+    field. Uses ast.literal_eval rather than a quote-replacement hack, since
+    repository names can themselves contain apostrophes.
+    """
+    if not raw:
+        return []
+    try:
+        parsed = ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
 def studies_by_repository(conn, table=_TABLE, repository=None, **kwargs):
-    """Return studies that selected the given repository ("Repo per Platform")."""
+    """
+    Return studies that use the given repository anywhere in their repository
+    list (`repo_list`), not just the first/primary one MDS happens to report
+    in `repo_per_platform`. Falls back to `repo_per_platform` for rows where
+    `repo_list` is missing or unparseable.
+    """
     if not repository:
         return {"query": "studies_by_repository", "results": [], "error": "repository param required"}
+
     rows = _fetchall(conn, f"""
         SELECT
             study_hdp_id,
             title,
             study_most_recent_appl,
-            project            AS project_num,
-            repo_per_platform  AS repository,
+            project             AS project_num,
+            repo_per_platform,
+            repo_study_link,
+            repo_list,
             project_start,
             project_end
         FROM `{table}`
-        WHERE repo_per_platform = %s
-        ORDER BY title
-    """, (repository,))
-    return {"query": "studies_by_repository", "results": rows}
+    """)
+
+    results = []
+    for row in rows:
+        match = next(
+            (r for r in _parse_repo_list(row.get("repo_list")) if r.get("repository_name") == repository),
+            None,
+        )
+        if match is None and row.get("repo_per_platform") == repository:
+            match = {
+                "repository_name": row.get("repo_per_platform"),
+                "repository_study_link": row.get("repo_study_link"),
+            }
+        if match is None:
+            continue
+        results.append({
+            "study_hdp_id":           row.get("study_hdp_id"),
+            "title":                  row.get("title"),
+            "study_most_recent_appl": row.get("study_most_recent_appl"),
+            "project_num":            row.get("project_num"),
+            "repository":             match.get("repository_name"),
+            "repository_study_link":  match.get("repository_study_link"),
+            "project_start":          row.get("project_start"),
+            "project_end":            row.get("project_end"),
+        })
+
+    results.sort(key=lambda r: r["title"] or "")
+    return {"query": "studies_by_repository", "results": results}
 
 
 def funding_ic_freq(conn, table=_TABLE, **kwargs):
