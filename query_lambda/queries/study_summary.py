@@ -27,7 +27,7 @@ def _fetchall(conn, sql, params=None):
     return rows
 
 
-def research_network_freq(conn, table=_TABLE):
+def research_network_freq(conn, table=_TABLE, **kwargs):
     """Return research network frequencies, sorted descending by count."""
     rows = _fetchall(conn, f"""
         SELECT research_network, COUNT(*) AS count
@@ -39,25 +39,45 @@ def research_network_freq(conn, table=_TABLE):
     return {"query": "research_network_freq", "results": rows}
 
 
-def ended_studies(conn, table=_TABLE):
-    """Return studies whose project end date is in the past."""
-    rows = _fetchall(conn, f"""
-        SELECT
-            study_hdp_id,
-            study_most_recent_appl,
-            project          AS project_num,
-            project_start,
-            project_end
-        FROM `{table}`
-        WHERE project_end IS NOT NULL
-          AND project_end != ''
-          AND project_end < DATE_FORMAT(NOW(), '%Y-%m-%d')
-        ORDER BY project_end
-    """)
+def ended_studies(conn, table=_TABLE, before=None, **kwargs):
+    """
+    Return studies whose project end date is before `before` (YYYY-MM-DD).
+    Defaults to NOW() if `before` isn't given.
+    """
+    if before:
+        rows = _fetchall(conn, f"""
+            SELECT
+                study_hdp_id,
+                title,
+                study_most_recent_appl,
+                project          AS project_num,
+                project_start,
+                project_end
+            FROM `{table}`
+            WHERE project_end IS NOT NULL
+              AND project_end != ''
+              AND project_end < %s
+            ORDER BY project_end
+        """, (before,))
+    else:
+        rows = _fetchall(conn, f"""
+            SELECT
+                study_hdp_id,
+                title,
+                study_most_recent_appl,
+                project          AS project_num,
+                project_start,
+                project_end
+            FROM `{table}`
+            WHERE project_end IS NOT NULL
+              AND project_end != ''
+              AND project_end < DATE_FORMAT(NOW(), '%Y-%m-%d')
+            ORDER BY project_end
+        """)
     return {"query": "ended_studies", "results": rows}
 
 
-def funding_ic_freq(conn, table=_TABLE):
+def funding_ic_freq(conn, table=_TABLE, **kwargs):
     """Return administering IC frequencies, sorted descending by count."""
     rows = _fetchall(conn, f"""
         SELECT administering_ic, COUNT(*) AS count
@@ -67,3 +87,11 @@ def funding_ic_freq(conn, table=_TABLE):
         ORDER BY count DESC
     """)
     return {"query": "funding_ic_freq", "results": rows}
+
+def get_resnet_resprog(conn, table=_TABLE, **kwargs):
+    """Return Research Program and Research Network assignments for each HDPID."""
+    rows = _fetchall(conn, f"""
+                     SELECT  study_hdp_id, research_program, research_network
+                     FROM `{table}`
+                     """)
+    return {"query": "get_resnet_resprog", "results": rows}

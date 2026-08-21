@@ -28,7 +28,7 @@ import os
 from dotenv import load_dotenv
 
 from db import connect_mysql
-from queries.study_summary import ended_studies, funding_ic_freq, research_network_freq
+from queries.study_summary import ended_studies, funding_ic_freq, research_network_freq, get_resnet_resprog
 
 load_dotenv()
 
@@ -39,6 +39,7 @@ QUERY_REGISTRY = {
     "research_network_freq": research_network_freq,
     "ended_studies":         ended_studies,
     "funding_ic_freq":       funding_ic_freq,
+    "get_resnet_resprog":    get_resnet_resprog,
 }
 
 _HEADERS = {
@@ -56,9 +57,21 @@ def _resolve_query_name(event):
     return event.get("query")
 
 
+def _resolve_query_params(event):
+    """Extra params to forward to the query function (everything but name/query)."""
+    if "queryStringParameters" in event:
+        params = dict(event.get("queryStringParameters") or {})
+        params.pop("name", None)
+        return params
+    params = dict(event)
+    params.pop("query", None)
+    return params
+
+
 def lambda_handler(event, context):
     name = _resolve_query_name(event)
-    logger.info("Invoked with query=%s", name)
+    extra_params = _resolve_query_params(event)
+    logger.info("Invoked with query=%s params=%s", name, extra_params)
 
     if not name:
         return {
@@ -82,7 +95,7 @@ def lambda_handler(event, context):
 
     conn = connect_mysql()
     try:
-        result = QUERY_REGISTRY[name](conn)
+        result = QUERY_REGISTRY[name](conn, **extra_params)
     except Exception as e:
         logger.exception("Query '%s' failed", name)
         return {
