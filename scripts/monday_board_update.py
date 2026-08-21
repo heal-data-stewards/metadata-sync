@@ -477,7 +477,7 @@ def export_finaldata(input_dir:Path, final_dataset:pd.DataFrame, mondayboard_mis
     logging.info("******************* EXPORTING ******************************************")
     logging.info(f"Exporting data to excel file at {outfile}")
     final_dataset.to_excel(outfile, engine='xlsxwriter', index=True)
-    batch_size = 1400
+    batch_size = 1000
     num_batches = (len(final_dataset) - 1) // batch_size + 1
     for batch_num in range(num_batches):
         start_idx = batch_num * batch_size

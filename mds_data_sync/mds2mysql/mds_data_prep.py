@@ -93,7 +93,7 @@ def pull_mds_data(response_json, write_to_disk):
                     if is_repository_study_link:
                         repository_study_link = repository_info[0][0]
                         repository_name = repository_info[0][1] #response_json[guid]['gen3_discovery']['study_metadata']['metadata_location']['data_repositories'][0].get('repository_study_link', '')
-                        print(f"REpository study link for {guid} is {repository_study_link}")
+                        print(f"Repository study link for {guid} is {repository_study_link}")
                 data_type = ''
                 metadata['gen3_metadata'][guid]['data_type'] = ''
                 if 'data' in response_json[guid]['gen3_discovery']['study_metadata'] and \

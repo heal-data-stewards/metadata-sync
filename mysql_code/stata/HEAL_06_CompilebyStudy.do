@@ -96,6 +96,7 @@ save "$temp/pi_emails_key.dta", replace
 * Apply the non-missing res_net for the study to rows where res_net is missing *;
 use "$temp/alldata_$today.dta", clear
 keep if res_net!=""
+keep if res_net!="NULL"
 keep xstudy_id res_net
 sort xstudy_id res_net
 duplicates drop

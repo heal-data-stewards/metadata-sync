@@ -77,6 +77,26 @@ def ended_studies(conn, table=_TABLE, before=None, **kwargs):
     return {"query": "ended_studies", "results": rows}
 
 
+def studies_by_repository(conn, table=_TABLE, repository=None, **kwargs):
+    """Return studies that selected the given repository ("Repo per Platform")."""
+    if not repository:
+        return {"query": "studies_by_repository", "results": [], "error": "repository param required"}
+    rows = _fetchall(conn, f"""
+        SELECT
+            study_hdp_id,
+            title,
+            study_most_recent_appl,
+            project            AS project_num,
+            repo_per_platform  AS repository,
+            project_start,
+            project_end
+        FROM `{table}`
+        WHERE repo_per_platform = %s
+        ORDER BY title
+    """, (repository,))
+    return {"query": "studies_by_repository", "results": rows}
+
+
 def funding_ic_freq(conn, table=_TABLE, **kwargs):
     """Return administering IC frequencies, sorted descending by count."""
     rows = _fetchall(conn, f"""

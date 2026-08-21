@@ -235,6 +235,7 @@ log_out(f"Progress Tracker table after dropping records where appl_id is blank: 
 
 
 
+
 # * -- CTN Protocols -- *;
 # * Create new CTN variables*;
 # * Remove CTN values from appl_id and project_num fields *;

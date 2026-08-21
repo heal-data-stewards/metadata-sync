@@ -14,6 +14,7 @@ Available queries
   study_summary.research_network_freq  — research network frequencies
   study_summary.ended_studies          — studies past their project end date
   study_summary.funding_ic_freq        — administering IC frequencies
+  study_summary.studies_by_repository  — studies that selected a given repository
 
 Adding a new query
 ------------------
@@ -28,7 +29,13 @@ import os
 from dotenv import load_dotenv
 
 from db import connect_mysql
-from queries.study_summary import ended_studies, funding_ic_freq, research_network_freq, get_resnet_resprog
+from queries.study_summary import (
+    ended_studies,
+    funding_ic_freq,
+    get_resnet_resprog,
+    research_network_freq,
+    studies_by_repository,
+)
 
 load_dotenv()
 
@@ -40,6 +47,7 @@ QUERY_REGISTRY = {
     "ended_studies":         ended_studies,
     "funding_ic_freq":       funding_ic_freq,
     "get_resnet_resprog":    get_resnet_resprog,
+    "studies_by_repository": studies_by_repository,
 }
 
 _HEADERS = {
