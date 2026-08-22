@@ -1,0 +1,92 @@
+name: Deploy Lambdas on Merge
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'mysql_tables_sync_lambda/**'
+      # - 'src/function-b/**'
+      # - 'src/function-c/**'   # Add all your Lambda folders here
+
+permissions:
+  id-token: write             # Required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1                                                    # Your AWS region
+  AWS_ROLE_ARN: arn:aws:iam::339712780658:role/github-actions-metadata-sync-role   # Your IAM role ARN
+
+jobs:
+  deploy-mysql-tables-sync-test:
+    runs-on: ubuntu-latest
+    if: |
+      contains(toJSON(github.event.commits.*.modified), 'mysql_tables_sync_lambda/') 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Package Lambda
+        run: |
+          cd 'mysql_tables_sync_lambda/'
+          zip -r ../mysql_tables_sync_lambda.zip .
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name mysql_tables_sync_test \
+            --zip-file fileb://mysql_tables_sync_lambda.zip
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name mysql_tables_sync_test
+
+  # deploy-function-b:
+  #   runs-on: ubuntu-latest
+  #   if: |
+  #     contains(toJSON(github.event.commits.*.modified), 'src/function-b/') ||
+  #     contains(toJSON(github.event.commits.*.added), 'src/function-b/')
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v3
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v4
+  #       with:
+  #         python-version: '3.11'
+
+  #     - name: Configure AWS Credentials via OIDC
+  #       uses: aws-actions/configure-aws-credentials@v2
+  #       with:
+  #         role-to-assume: ${{ env.AWS_ROLE_ARN }}
+  #         aws-region: ${{ env.AWS_REGION }}
+
+  #     - name: Install dependencies
+  #       run: |
+  #         cd src/function-b
+  #         pip install -r requirements.txt -t .
+
+  #     - name: Package Lambda
+  #       run: |
+  #         cd src/function-b
+  #         zip -r ../../function-b.zip .
+
+  #     - name: Deploy to Lambda
+  #       run: |
+  #         aws lambda update-function-code \
+  #           --function-name function-b \
+  #           --zip-file fileb://function-b.zip
+
+  #     - name: Wait for update to complete
+  #       run: |
+  #         aws lambda wait function-updated \
+  #           --function-name function-b
+
+  # # Copy and paste the job block above for each additional Lambda function
