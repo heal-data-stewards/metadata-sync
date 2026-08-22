@@ -45,6 +45,7 @@ table when it finishes (success or failure). Unset = notifications disabled.
 
 import json
 import logging
+import os
 
 from dotenv import load_dotenv
 
@@ -86,6 +87,20 @@ TABLE_REGISTRY = {
     # "awards":           _run_awards,
 }
 
+# Registry key -> (env var controlling the real table name, default table name).
+# Mirrors the resolution each table module does internally — kept here too so
+# Slack notifications can show the real table name even on failure, before
+# the table function itself ever gets a chance to resolve/return it.
+_TABLE_NAME_ENV = {
+    "reporter":      ("REPORTER_TABLE_NAME", "reporter_test"),
+    "study_summary": ("STUDY_SUMMARY_TABLE_NAME", "study_summary_test"),
+}
+
+
+def _resolve_table_name(key: str) -> str:
+    env_var, default = _TABLE_NAME_ENV.get(key, (None, key))
+    return os.getenv(env_var, default) if env_var else key
+
 _HEADERS = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
 
 
@@ -113,16 +128,17 @@ def lambda_handler(event, context):
     results = {}
     errors  = {}
     for t in tables_to_run:
+        table_name = _resolve_table_name(t)
         try:
-            logger.info("Starting update: %s", t)
+            logger.info("Starting update: %s (table=%s)", t, table_name)
             results[t] = TABLE_REGISTRY[t]()
             logger.info("Finished update: %s → %s", t, results[t])
             details = "  ".join(f"{k}={v}" for k, v in results[t].items() if k != "table")
-            notify_slack(f":white_check_mark: `{t}` update complete — {details}")
+            notify_slack(f":white_check_mark: `{table_name}` update complete — {details}")
         except Exception as e:
             logger.exception("Failed to update %s", t)
             errors[t] = str(e)
-            notify_slack(f":x: `{t}` update failed — {e}")
+            notify_slack(f":x: `{table_name}` update failed — {e}")
 
     status = 500 if errors else 200
     return {
