@@ -22,34 +22,40 @@ individual tables on different cadences:
 
 Adding a new table
 ------------------
-1. Create metadata-sync/mysql_lambda/tables/<your_table>.py
+1. Create metadata-sync/mysql_tables_sync_lambda/tables/<your_table>.py
 2. Implement update_<your_table>(conn_or_engine, ...) -> dict
 3. Add an entry to TABLE_REGISTRY below.
 
 Lambda packaging notes
 ----------------------
-Include these files alongside lambda_handler.py when deploying:
+Include these files alongside lambda_function.py when deploying:
   - db.py
+  - notify.py
   - tables/__init__.py
   - tables/reporter.py
   - tables/study_summary.py
-  - reporter/heal_award_segmenter_lib.py   (required by tables/reporter.py)
-  - reporter/reporter_dd.csv               (optional; controls column types)
+  - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
+  - reporter_lib/reporter_dd.csv               (optional; controls column types)
+
+Slack notifications
+--------------------
+Set SLACK_WEBHOOK_URL to a Slack incoming webhook URL to get a message per
+table when it finishes (success or failure). Unset = notifications disabled.
 """
 
 import json
 import logging
-import os
 
 from dotenv import load_dotenv
 
 from db import connect_mysql, create_alchemy_engine
+from notify import notify_slack
 from tables.reporter import update_reporter
 from tables.study_summary import update_study_summary
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -62,7 +68,7 @@ logger = logging.getLogger(__name__)
 
 def _run_reporter():
     engine = create_alchemy_engine()
-    return update_reporter(engine, sns_topic_arn=os.getenv("REPORTER_SNS_TOPIC_ARN"))
+    return update_reporter(engine)
 
 
 def _run_study_summary():
@@ -111,9 +117,12 @@ def lambda_handler(event, context):
             logger.info("Starting update: %s", t)
             results[t] = TABLE_REGISTRY[t]()
             logger.info("Finished update: %s → %s", t, results[t])
+            details = "  ".join(f"{k}={v}" for k, v in results[t].items() if k != "table")
+            notify_slack(f":white_check_mark: `{t}` update complete — {details}")
         except Exception as e:
             logger.exception("Failed to update %s", t)
             errors[t] = str(e)
+            notify_slack(f":x: `{t}` update failed — {e}")
 
     status = 500 if errors else 200
     return {

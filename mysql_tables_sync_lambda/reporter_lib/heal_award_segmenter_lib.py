@@ -105,8 +105,15 @@ def post_request(clean_non_utf: bool, id_type: str, project_id_list: list, end_p
         }
 
         # Request Object
-        req = requests.post(url, headers=headers, json=request_body)
-        
+        # timeout=(connect, read) — without this, a network issue (e.g. no
+        # outbound route from a VPC-attached Lambda) hangs forever instead
+        # of failing fast.
+        try:
+            req = requests.post(url, headers=headers, json=request_body, timeout=(10, 30))
+        except requests.exceptions.RequestException as e:
+            logger.warning("API request failed for chunk starting at %s: %s", i, e)
+            continue
+
         # Check if request was successful
         if not req.ok:
             logger.warning("API request failed with status code %s: %s", req.status_code, req.text)

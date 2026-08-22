@@ -12,7 +12,6 @@ import logging
 import os
 from datetime import datetime, timezone
 
-import boto3
 import pandas as pd
 from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 
@@ -62,14 +61,13 @@ def _build_sql_dtype_map(dd_path: str) -> dict | None:
     return dtype_map
 
 
-def update_reporter(engine, target_table: str | None = None, sns_topic_arn: str | None = None) -> dict:
+def update_reporter(engine, target_table: str | None = None) -> dict:
     """
     Refresh the reporter MySQL table.
 
     Args:
         engine:         SQLAlchemy engine (from db.create_alchemy_engine()).
         target_table:   Table name to write; defaults to TABLE_NAME env var or 'reporter'.
-        sns_topic_arn:  Optional SNS topic for success/failure notifications.
 
     Returns:
         dict with keys: table, rows_written, added, removed
@@ -119,11 +117,5 @@ def update_reporter(engine, target_table: str | None = None, sns_topic_arn: str 
         f"Rows: {len(reporter_df)}  Added: {len(added)}  Removed: {len(removed)}"
     )
     logger.info(summary)
-    if sns_topic_arn:
-        boto3.client("sns").publish(
-            TopicArn=sns_topic_arn,
-            Subject=f"Reporter update succeeded — {run_time}",
-            Message=summary,
-        )
 
     return {"table": target_table, "rows_written": len(reporter_df), "added": len(added), "removed": len(removed)}
