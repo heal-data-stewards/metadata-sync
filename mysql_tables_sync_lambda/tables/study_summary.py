@@ -50,6 +50,9 @@ RENAME_DICT = {
     "repository_name":        "Repo per Platform",
     "repository_study_link":  "Repo Study Link",
     "repository_metadata":    "Repo List",
+    "repository_selected":    "Repo Selected",
+    "data_linked_on_platform": "Data Linked",
+    "guid_type":              "GUID Type",
     "archived":               "Archived",
     "heal_funded":            "HEAL-Related",
     "do_not_engage":          "Do not Engage",
@@ -73,6 +76,9 @@ RENAME_DICT_MDS = {
     "repository_name":        "Repo per Platform",
     "repository_study_link":  "Repo Study Link",
     "repository_metadata":    "Repo List",
+    "repository_selected":    "Repo Selected",
+    "data_linked_on_platform": "Data Linked",
+    "guid_type":              "GUID Type",
     "archived":               "Archived",
 }
 
@@ -91,6 +97,9 @@ RENAME_DICT_CTN = {
     "repository_name":        "Repo per Platform",
     "repository_study_link":  "Repo Study Link",
     "repository_metadata":    "Repo List",
+    "repository_selected":    "Repo Selected",
+    "data_linked_on_platform": "Data Linked",
+    "guid_type":              "GUID Type",
     "archived":               "Archived",
 }
 
