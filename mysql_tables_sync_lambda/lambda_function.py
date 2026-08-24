@@ -56,7 +56,7 @@ from tables.study_summary import update_study_summary
 
 load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
