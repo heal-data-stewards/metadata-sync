@@ -18,12 +18,31 @@ env:
   AWS_ROLE_ARN: arn:aws:iam::339712780658:role/github-actions-metadata-sync-role   # Your IAM role ARN
 
 jobs:
-  deploy-mysql-tables-sync-test:
+  # Determines which Lambda directory actually changed, using a real
+  # before/after git diff (dorny/paths-filter) rather than github.event.commits,
+  # which is unreliable (often empty) for branch-creation pushes, squash
+  # merges, or pushes over 20 commits — see the deploy-lambdas.yml history for
+  # why that approach kept causing jobs to skip.
+  changes:
     runs-on: ubuntu-latest
-    # No job-level `if:` here — github.event.commits is unreliable (often empty)
-    # for branch-creation pushes, squash merges, or pushes over 20 commits. The
-    # workflow-level `paths:` filter above already gates this correctly via a
-    # proper before/after diff, so it doesn't need duplicating here.
+    outputs:
+      mysql_tables_sync: ${{ steps.filter.outputs.mysql_tables_sync }}
+      # function_b: ${{ steps.filter.outputs.function_b }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            mysql_tables_sync:
+              - 'mysql_tables_sync_lambda/**'
+            # function_b:
+            #   - 'src/function-b/**'   # Add a filter entry per Lambda folder
+
+  deploy-mysql-tables-sync-test:
+    needs: changes
+    if: needs.changes.outputs.mysql_tables_sync == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -51,18 +70,12 @@ jobs:
             --function-name mysql_tables_sync_test
 
   # deploy-function-b:
+  #   needs: changes
+  #   if: needs.changes.outputs.function_b == 'true'
   #   runs-on: ubuntu-latest
-  #   if: |
-  #     contains(toJSON(github.event.commits.*.modified), 'src/function-b/') ||
-  #     contains(toJSON(github.event.commits.*.added), 'src/function-b/')
   #   steps:
   #     - name: Checkout code
   #       uses: actions/checkout@v3
-
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v4
-  #       with:
-  #         python-version: '3.11'
 
   #     - name: Configure AWS Credentials via OIDC
   #       uses: aws-actions/configure-aws-credentials@v2
@@ -70,15 +83,15 @@ jobs:
   #         role-to-assume: ${{ env.AWS_ROLE_ARN }}
   #         aws-region: ${{ env.AWS_REGION }}
 
-  #     - name: Install dependencies
-  #       run: |
-  #         cd src/function-b
-  #         pip install -r requirements.txt -t .
+  #     # If this Lambda doesn't have a layer providing its dependencies,
+  #     # add a "Set up Python" + "pip install -r requirements.txt -t ."
+  #     # step here before packaging, same as this repo's other lambdas
+  #     # originally needed until layers took over.
 
   #     - name: Package Lambda
   #       run: |
-  #         cd src/function-b
-  #         zip -r ../../function-b.zip .
+  #         cd src/function-b   # NOTE: real lambda dirs here sit at repo root
+  #         zip -r ../function-b.zip .   # (1 level deep) — one ../, not two
 
   #     - name: Deploy to Lambda
   #       run: |
@@ -91,4 +104,6 @@ jobs:
   #         aws lambda wait function-updated \
   #           --function-name function-b
 
-  # # Copy and paste the job block above for each additional Lambda function
+  # # Copy and paste the job block above for each additional Lambda function,
+  # # and add its filter entry to the `changes` job's `filters:` above, plus
+  # # its own path under `on.push.paths:` at the top of this file.
