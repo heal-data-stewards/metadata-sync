@@ -20,8 +20,10 @@ env:
 jobs:
   deploy-mysql-tables-sync-test:
     runs-on: ubuntu-latest
-    if: |
-      contains(toJSON(github.event.commits.*.modified), 'mysql_tables_sync_lambda/') 
+    # No job-level `if:` here — github.event.commits is unreliable (often empty)
+    # for branch-creation pushes, squash merges, or pushes over 20 commits. The
+    # workflow-level `paths:` filter above already gates this correctly via a
+    # proper before/after diff, so it doesn't need duplicating here.
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
