@@ -7,7 +7,7 @@ on:
       - main
     paths:
       - 'mysql_tables_sync_lambda/**'
-      # - 'src/function-b/**'
+      - 'query_mysql_tables_lambda/**'
       # - 'src/function-c/**'   # Add all your Lambda folders here
 
 permissions:
@@ -28,7 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       mysql_tables_sync: ${{ steps.filter.outputs.mysql_tables_sync }}
-      # function_b: ${{ steps.filter.outputs.function_b }}
+      query_mysql_tables: ${{ steps.filter.outputs.query_mysql_tables }}
+      # function_c: ${{ steps.filter.outputs.function_c }}
     steps:
       - uses: actions/checkout@v3
       - uses: dorny/paths-filter@v3
@@ -37,8 +38,10 @@ jobs:
           filters: |
             mysql_tables_sync:
               - 'mysql_tables_sync_lambda/**'
-            # function_b:
-            #   - 'src/function-b/**'   # Add a filter entry per Lambda folder
+            query_mysql_tables:
+              - 'query_mysql_tables_lambda/**'
+            # function_c:
+            #   - 'src/function-c/**'   # Add a filter entry per Lambda folder
 
   # develop -> mysql_tables_sync_test, main -> mysql_tables_sync (production)
   deploy-mysql-tables-sync:
@@ -83,10 +86,52 @@ jobs:
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
 
-  # deploy-function-b:
+  # develop -> query_mysql_tables_test, main -> query_mysql_tables (production)
+  deploy-query-mysql-tables:
+    needs: changes
+    if: needs.changes.outputs.query_mysql_tables == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine target function
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "FUNCTION_NAME=query_mysql_tables" >> "$GITHUB_ENV"
+          else
+            echo "FUNCTION_NAME=query_mysql_tables_test" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package Lambda
+        run: |
+          cd 'query_mysql_tables_lambda/'
+          zip -r ../query_mysql_tables_lambda.zip .
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://query_mysql_tables_lambda.zip
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+  # develop -> function_c_test, main -> function_c (production)
+  # deploy-function-c:
   #   needs: changes
-  #   if: needs.changes.outputs.function_b == 'true'
+  #   if: needs.changes.outputs.function_c == 'true'
   #   runs-on: ubuntu-latest
+  #   environment: ${{ github.ref_name == 'main' && 'production' || '' }}
   #   steps:
   #     - name: Checkout code
   #       uses: actions/checkout@v3
@@ -102,21 +147,29 @@ jobs:
   #     # step here before packaging, same as this repo's other lambdas
   #     # originally needed until layers took over.
 
+  #     - name: Determine target function
+  #       run: |
+  #         if [ "${{ github.ref_name }}" = "main" ]; then
+  #           echo "FUNCTION_NAME=function_c" >> "$GITHUB_ENV"
+  #         else
+  #           echo "FUNCTION_NAME=function_c_test" >> "$GITHUB_ENV"
+  #         fi
+
   #     - name: Package Lambda
   #       run: |
-  #         cd src/function-b   # NOTE: real lambda dirs here sit at repo root
-  #         zip -r ../function-b.zip .   # (1 level deep) — one ../, not two
+  #         cd function_c_lambda   # real lambda dirs here sit at repo root
+  #         zip -r ../function_c_lambda.zip .   # (1 level deep) — one ../, not two
 
   #     - name: Deploy to Lambda
   #       run: |
   #         aws lambda update-function-code \
-  #           --function-name function-b \
-  #           --zip-file fileb://function-b.zip
+  #           --function-name "$FUNCTION_NAME" \
+  #           --zip-file fileb://function_c_lambda.zip
 
   #     - name: Wait for update to complete
   #       run: |
   #         aws lambda wait function-updated \
-  #           --function-name function-b
+  #           --function-name "$FUNCTION_NAME"
 
   # # Copy and paste the job block above for each additional Lambda function,
   # # and add its filter entry to the `changes` job's `filters:` above, plus
