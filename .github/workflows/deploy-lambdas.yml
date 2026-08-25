@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - main
     paths:
       - 'mysql_tables_sync_lambda/**'
       # - 'src/function-b/**'
@@ -39,10 +40,15 @@ jobs:
             # function_b:
             #   - 'src/function-b/**'   # Add a filter entry per Lambda folder
 
-  deploy-mysql-tables-sync-test:
+  # develop -> mysql_tables_sync_test, main -> mysql_tables_sync (production)
+  deploy-mysql-tables-sync:
     needs: changes
     if: needs.changes.outputs.mysql_tables_sync == 'true'
     runs-on: ubuntu-latest
+    # Only the main/production path is gated — this resolves to empty (no
+    # environment, no approval pause) for develop, and to "production" (whose
+    # required-reviewer rule is configured in Settings > Environments) for main.
+    environment: ${{ github.ref_name == 'main' && 'production' || '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -53,6 +59,14 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Determine target function
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "FUNCTION_NAME=mysql_tables_sync" >> "$GITHUB_ENV"
+          else
+            echo "FUNCTION_NAME=mysql_tables_sync_test" >> "$GITHUB_ENV"
+          fi
+
       - name: Package Lambda
         run: |
           cd 'mysql_tables_sync_lambda/'
@@ -61,13 +75,13 @@ jobs:
       - name: Deploy to Lambda
         run: |
           aws lambda update-function-code \
-            --function-name mysql_tables_sync_test \
+            --function-name "$FUNCTION_NAME" \
             --zip-file fileb://mysql_tables_sync_lambda.zip
 
       - name: Wait for update to complete
         run: |
           aws lambda wait function-updated \
-            --function-name mysql_tables_sync_test
+            --function-name "$FUNCTION_NAME"
 
   # deploy-function-b:
   #   needs: changes
