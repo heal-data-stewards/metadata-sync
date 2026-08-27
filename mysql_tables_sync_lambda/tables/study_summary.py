@@ -6,7 +6,7 @@ research_networks, engagement_flags, and po_emails into one denormalized
 row per study (keyed by HDPID / appl_id).
 
 This replaces the old monday_studies_mysql table. The table name is
-configurable via STUDY_SUMMARY_TABLE_NAME env var (default: study_summary).
+configurable via STUDY_SUMMARY_TABLE_NAME env var (default: study_summary_test).
 """
 
 import logging
@@ -356,14 +356,14 @@ def update_study_summary(conn, target_table: str | None = None) -> dict:
     Args:
         conn:         mysql.connector connection (from db.connect_mysql()).
         target_table: Table name to write; defaults to STUDY_SUMMARY_TABLE_NAME
-                      env var or 'study_summary'.
+                      env var or 'study_summary_test'.
 
     Returns:
         dict with keys: table, rows_written
     """
     import os
     if target_table is None:
-        target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary")
+        target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary_test")
     df = _build_study_summary(conn)
     df = _prepare_for_mysql(df)
     _write_study_summary(conn, df, target_table)

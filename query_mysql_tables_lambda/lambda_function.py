@@ -13,8 +13,10 @@ Available queries
 -----------------
   study_summary.research_network_freq  — research network frequencies
   study_summary.ended_studies          — studies past their project end date
+  study_summary.studies_ending_soon    — studies ending within the next N months (default 6)
   study_summary.funding_ic_freq        — administering IC frequencies
   study_summary.studies_by_repository  — studies that selected a given repository
+  study_summary.get_resnet_resprog     — HDPIDs with their Research Program / Research Network
 
 Adding a new query
 ------------------
@@ -35,6 +37,7 @@ from queries.study_summary import (
     get_resnet_resprog,
     research_network_freq,
     studies_by_repository,
+    studies_ending_soon,
 )
 
 load_dotenv()
@@ -45,6 +48,7 @@ logger = logging.getLogger(__name__)
 QUERY_REGISTRY = {
     "research_network_freq": research_network_freq,
     "ended_studies":         ended_studies,
+    "studies_ending_soon":   studies_ending_soon,
     "funding_ic_freq":       funding_ic_freq,
     "get_resnet_resprog":    get_resnet_resprog,
     "studies_by_repository": studies_by_repository,

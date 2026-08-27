@@ -17,7 +17,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-_TABLE = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary")
+_TABLE = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary_test")
 
 
 def _fetchall(conn, sql, params=None):
@@ -26,6 +26,17 @@ def _fetchall(conn, sql, params=None):
     rows = cur.fetchall()
     cur.close()
     return rows
+
+
+_GUID_TYPE_LABELS = {
+    "discovery_metadata":              "Registered",
+    "unregistered_discovery_metadata": "Not Registered",
+    "discovery_metadata_archive":      "Archived",
+}
+
+
+def _registration_status(guid_type):
+    return _GUID_TYPE_LABELS.get(guid_type, guid_type or "Unknown")
 
 
 def research_network_freq(conn, table=_TABLE, **kwargs):
@@ -40,42 +51,83 @@ def research_network_freq(conn, table=_TABLE, **kwargs):
     return {"query": "research_network_freq", "results": rows}
 
 
+_ENDED_STUDIES_SELECT = """
+    SELECT
+        study_hdp_id,
+        title,
+        study_most_recent_appl,
+        project             AS project_num,
+        guid_type,
+        repo_selected       AS repository_selected,
+        repo_per_platform   AS repository,
+        repo_study_link     AS repository_study_link,
+        data_linked,
+        project_start,
+        project_end
+    FROM `{table}`
+    WHERE project_end IS NOT NULL
+      AND project_end != ''
+"""
+
+
+def _format_ended_row(row):
+    return {
+        "study_hdp_id":           row.get("study_hdp_id"),
+        "title":                  row.get("title"),
+        "study_most_recent_appl": row.get("study_most_recent_appl"),
+        "project_num":            row.get("project_num"),
+        "registration_status":    _registration_status(row.get("guid_type")),
+        "repository_selected":    row.get("repository_selected"),
+        "repository":             row.get("repository"),
+        "repository_study_link":  row.get("repository_study_link"),
+        "data_linked":            row.get("data_linked"),
+        "project_start":          row.get("project_start"),
+        "project_end":            row.get("project_end"),
+    }
+
+
 def ended_studies(conn, table=_TABLE, before=None, **kwargs):
     """
     Return studies whose project end date is before `before` (YYYY-MM-DD).
     Defaults to NOW() if `before` isn't given.
+
+    Includes registration status, repository selection/link, and data-linked
+    status so results can be filtered client-side (e.g. registered + selected
+    a repository + past end date + not yet linked any data).
     """
+    sql = _ENDED_STUDIES_SELECT.format(table=table)
     if before:
-        rows = _fetchall(conn, f"""
-            SELECT
-                study_hdp_id,
-                title,
-                study_most_recent_appl,
-                project          AS project_num,
-                project_start,
-                project_end
-            FROM `{table}`
-            WHERE project_end IS NOT NULL
-              AND project_end != ''
-              AND project_end < %s
-            ORDER BY project_end
-        """, (before,))
+        rows = _fetchall(conn, sql + " AND project_end < %s ORDER BY project_end", (before,))
     else:
-        rows = _fetchall(conn, f"""
-            SELECT
-                study_hdp_id,
-                title,
-                study_most_recent_appl,
-                project          AS project_num,
-                project_start,
-                project_end
-            FROM `{table}`
-            WHERE project_end IS NOT NULL
-              AND project_end != ''
-              AND project_end < DATE_FORMAT(NOW(), '%Y-%m-%d')
-            ORDER BY project_end
-        """)
-    return {"query": "ended_studies", "results": rows}
+        rows = _fetchall(conn, sql + " AND project_end < DATE_FORMAT(NOW(), '%Y-%m-%d') ORDER BY project_end")
+    return {"query": "ended_studies", "results": [_format_ended_row(r) for r in rows]}
+
+
+def studies_ending_soon(conn, table=_TABLE, months=6, **kwargs):
+    """
+    Return studies whose project end date falls within the next `months`
+    months (default 6) from today.
+
+    Same columns as ended_studies — registration status, repository
+    selection/link, data-linked status — so results can be filtered
+    client-side (e.g. registered + no repository selected yet).
+    """
+    try:
+        months_int = int(months)
+    except (TypeError, ValueError):
+        return {"query": "studies_ending_soon", "results": [], "error": "months must be an integer"}
+
+    # months_int is interpolated directly (not bound as %s) to avoid mixing
+    # MySQL's own %Y-%m-%d format literals with a %s parameter placeholder
+    # in the same query string. Safe since int() above rejects anything that
+    # isn't actually an integer.
+    sql = _ENDED_STUDIES_SELECT.format(table=table) + f"""
+        AND project_end BETWEEN DATE_FORMAT(NOW(), '%Y-%m-%d')
+                             AND DATE_FORMAT(DATE_ADD(NOW(), INTERVAL {months_int} MONTH), '%Y-%m-%d')
+        ORDER BY project_end
+    """
+    rows = _fetchall(conn, sql)
+    return {"query": "studies_ending_soon", "results": [_format_ended_row(r) for r in rows]}
 
 
 def _parse_repo_list(raw):
