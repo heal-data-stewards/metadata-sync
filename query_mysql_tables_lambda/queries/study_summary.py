@@ -17,7 +17,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-_TABLE = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary")
+_TABLE = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary_test")
 
 
 def _fetchall(conn, sql, params=None):
