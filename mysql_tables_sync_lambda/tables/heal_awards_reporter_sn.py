@@ -13,7 +13,6 @@ Depends on the `reporter` table being current (run after update_reporter).
 
 import logging
 import os
-import re
 
 import pandas as pd
 from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
@@ -22,18 +21,9 @@ from reporter_lib.heal_award_segmenter_lib import (
     flatten_json,
     post_request,
     prepare_for_ingest,
-    utfy_dict,
 )
 
 logger = logging.getLogger(__name__)
-
-_SERIAL_RE = re.compile(r'[A-Z]{2}\d{6}')
-
-
-def _serial_from_proj_num(proj_num: str) -> str | None:
-    """Extract IC+6-digit serial number from a full NIH project number."""
-    m = _SERIAL_RE.search(str(proj_num))
-    return m.group(0) if m else None
 
 
 def update_heal_awards_reporter_sn(engine, target_table: str | None = None) -> dict:
@@ -53,50 +43,27 @@ def update_heal_awards_reporter_sn(engine, target_table: str | None = None) -> d
             "HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"
         )
 
-    serial_nums: set[str] = set()
-
-    # --- Source 1: proj_ser_num from reporter table ---
+    # Pull proj_ser_num from reporter table (which is built from awards, so covers both)
     try:
         reporter_db = pd.read_sql_table("reporter", con=engine)
-        sn_col = "proj_ser_num"
-        if sn_col in reporter_db.columns:
-            from_reporter = (
-                reporter_db[sn_col]
-                .dropna()
-                .astype(str)
-                .str.strip()
-                .loc[lambda s: s != ""]
-                .unique()
-                .tolist()
-            )
-            serial_nums.update(from_reporter)
-            logger.info("Collected %d serial nums from reporter table", len(from_reporter))
-        else:
-            logger.warning("reporter table has no proj_ser_num column — skipping")
     except (SQLAlchemyError, NoSuchTableError, ValueError) as e:
-        logger.warning("Could not read reporter table: %s", e)
+        logger.error("Could not read reporter table: %s", e)
+        return {"table": target_table, "rows_written": 0, "serial_nums_queried": 0}
 
-    # --- Source 2: derive serial numbers from proj_num in awards table ---
-    try:
-        awards_db = pd.read_sql_table("awards", con=engine)
-        if "proj_num" in awards_db.columns:
-            from_awards = (
-                awards_db["proj_num"]
-                .dropna()
-                .astype(str)
-                .map(_serial_from_proj_num)
-                .dropna()
-                .unique()
-                .tolist()
-            )
-            serial_nums.update(from_awards)
-            logger.info("Collected %d serial nums from awards table", len(from_awards))
-        else:
-            logger.warning("awards table has no proj_num column — skipping")
-    except (SQLAlchemyError, NoSuchTableError, ValueError) as e:
-        logger.warning("Could not read awards table: %s", e)
+    if "proj_ser_num" not in reporter_db.columns:
+        logger.error("reporter table has no proj_ser_num column — aborting")
+        return {"table": target_table, "rows_written": 0, "serial_nums_queried": 0}
 
-    serial_list = sorted(serial_nums)
+    serial_list = (
+        reporter_db["proj_ser_num"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .loc[lambda s: s != ""]
+        .unique()
+        .tolist()
+    )
+    logger.info("Collected %d unique serial nums from reporter table", len(serial_list))
     logger.info("Total unique serial numbers to query: %d", len(serial_list))
 
     if not serial_list:
