@@ -80,8 +80,6 @@ def post_request(clean_non_utf: bool, id_type: str, project_id_list: list, end_p
 
     if id_type == "appl_id":
         criteria_name = "appl_ids"
-    elif id_type == "project_serial_num":
-        criteria_name = "project_serial_nums"
     else:
         if end_point == "projects/search":
             criteria_name = "project_nums"
