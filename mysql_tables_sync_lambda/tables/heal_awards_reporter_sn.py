@@ -43,15 +43,16 @@ def update_heal_awards_reporter_sn(engine, target_table: str | None = None) -> d
             "HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"
         )
 
-    # Pull proj_ser_num from reporter table (which is built from awards, so covers both)
+    # Pull proj_ser_num from the same reporter table that update_reporter() just wrote
+    reporter_source = os.getenv("REPORTER_TABLE_NAME", "reporter_test")
     try:
-        reporter_db = pd.read_sql_table("reporter", con=engine)
+        reporter_db = pd.read_sql_table(reporter_source, con=engine)
     except (SQLAlchemyError, NoSuchTableError, ValueError) as e:
         logger.error("Could not read reporter table: %s", e)
         return {"table": target_table, "rows_written": 0, "serial_nums_queried": 0}
 
     if "proj_ser_num" not in reporter_db.columns:
-        logger.error("reporter table has no proj_ser_num column — aborting")
+        logger.error("%s table has no proj_ser_num column — aborting", reporter_source)
         return {"table": target_table, "rows_written": 0, "serial_nums_queried": 0}
 
     serial_list = (
@@ -63,7 +64,7 @@ def update_heal_awards_reporter_sn(engine, target_table: str | None = None) -> d
         .unique()
         .tolist()
     )
-    logger.info("Collected %d unique serial nums from reporter table", len(serial_list))
+    logger.info("Collected %d unique serial nums from %s", len(serial_list), reporter_source)
     logger.info("Total unique serial numbers to query: %d", len(serial_list))
 
     if not serial_list:
