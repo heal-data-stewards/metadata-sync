@@ -53,6 +53,7 @@ from db import connect_mysql, create_alchemy_engine
 from notify import notify_slack
 from tables.reporter import update_reporter
 from tables.study_summary import update_study_summary
+from tables.heal_awards_reporter_sn import update_heal_awards_reporter_sn
 
 load_dotenv()
 
@@ -79,9 +80,15 @@ def _run_study_summary():
     return result
 
 
+def _run_heal_awards_reporter_sn():
+    engine = create_alchemy_engine()
+    return update_heal_awards_reporter_sn(engine)
+
+
 TABLE_REGISTRY = {
-    "reporter":      _run_reporter,
-    "study_summary": _run_study_summary,
+    "reporter":               _run_reporter,
+    "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
+    "study_summary":          _run_study_summary,
     # Future tables — add entries here, e.g.:
     # "engagement_flags": _run_engagement_flags,
     # "awards":           _run_awards,
@@ -92,8 +99,9 @@ TABLE_REGISTRY = {
 # Slack notifications can show the real table name even on failure, before
 # the table function itself ever gets a chance to resolve/return it.
 _TABLE_NAME_ENV = {
-    "reporter":      ("REPORTER_TABLE_NAME", "reporter_test"),
-    "study_summary": ("STUDY_SUMMARY_TABLE_NAME", "study_summary_test"),
+    "reporter":               ("REPORTER_TABLE_NAME", "reporter_test"),
+    "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"),
+    "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary_test"),
 }
 
 
