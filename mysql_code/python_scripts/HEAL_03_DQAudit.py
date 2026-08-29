@@ -200,7 +200,8 @@ mysql_applkey = merged_df[keep_cols]
 # drop count num_rows dqauditwave
 # save "$temp/heal_awards_by_serial_number_$today.dta", replace /*n=5079*/
 
-raw_csv_path = (inp / "heal_awards_reporter_sn_04242026_out.csv")
+# Input: NIH Reporter serial-number extract — update filename for each new dataset run
+raw_csv_path = inp / os.environ.get("heal_awards_reporter_sn_file", "heal_awards_reporter_sn_04242026_out.csv")
 
 # 1. Load the raw awards reporter data
 # stringcols(_all) translates to dtype=str
@@ -221,10 +222,8 @@ date_cols = ["proj_end_date", "proj_strt_date", "bgt_strt", "bgt_end"]
 
 for col in date_cols:
     if col in heal_by_sn_01.columns:
-        # 1. Convert strings to datetime objects (handles M/D/YYYY and MM/DD/YYYY natively)
-        dt_series = pd.to_datetime(heal_by_sn_01[col], format="%m/%d/%Y", errors="coerce")
-        
-        # 2. Convert back to YYYY-MM-DD string format, keeping missing values intact
+        # Auto-detect format to handle both M/D/YYYY (old CSV) and ISO datetime (Lambda export)
+        dt_series = pd.to_datetime(heal_by_sn_01[col], errors="coerce")
         heal_by_sn_01[col] = dt_series.dt.strftime("%Y-%m-%d").fillna(heal_by_sn_01[col])
 
 
@@ -236,7 +235,8 @@ heal_by_sn_01.to_csv(os.path.join(out, f'int_heal_awards_by_serial_number_{today
 # 2. Load the old reporter_dqaudit table
 # import delim using "$raw/xold/reporter_dqaudit_2026-01-26.csv", varnames(1) stringcols(_all) bindquote(strict) favorstrfixed clear /*n=448*/
 # UPDATE to Pull directly from MySQL
-old_dqaudit = pd.read_csv(inp / "reporter_dqaudit_04242026.csv", sep=",", dtype=str, keep_default_na=False)
+# Input: prior reporter_dqaudit MySQL export — update filename for each new dataset run
+old_dqaudit = pd.read_csv(inp / os.environ.get("reporter_dqaudit_file", "reporter_dqaudit_04242026.csv"), sep=",", dtype=str, keep_default_na=False)
 old_dqaudit["dqauditwave"] = 1
 
 # 3. Append datasets together
@@ -547,100 +547,6 @@ df_flat_exports.to_csv(out / "reporter_dqaudit.csv", index=False, quoting=1)  # 
 df_flat_exports.to_excel(out / "reporter_dqaudit.xlsx", index=False)
 
 print(f"Pipeline successfully written. Exported row count: {len(df_flat_exports)}")
-
-
-
-
-# /* ----- 7. Debug: split up large file into 2 for MySQL import ----- */
-# use "$der/reporter_dqaudit.dta", clear
-# drop awd_not_date_date bgt_end_date bgt_strt_date proj_end_date_date proj_strt_date_date
-# gen row=_n
-# save "$temp/splits.dta", replace
-
-# keep if row<=240
-# drop row
-# save "$der/reporter_dqaudit_pt1.dta", replace
-# export delimited using "$der/reporter_dqaudit_pt1.csv", nolab quote replace
-
-# use "$temp/splits.dta", clear
-# keep if row>240
-# drop row
-# save "$der/reporter_dqaudit_pt2.dta", replace
-# export delimited using "$der/reporter_dqaudit_pt2.csv", nolab quote replace
-
-
-# * Correct date formats to match reporter table *;
-# import delim using "$raw/reporter_dqaudit_2026-02-16.csv", varnames(1) stringcols(_all) bindquote(strict) favorstrfixed clear /*n=489*/
-# foreach var in proj_strt_date proj_end_date {
-# 	gen x`var'=`var'+"T00:00:00"
-# 	order x`var', after(`var')
-# 	drop `var'
-# 	rename x`var' `var'
-# 	}
-# save "$der/reporter_dqaudit.dta", replace
-
-
-# Define path constants (replaces Stata globals)
-# source_dta_path = "$der/reporter_dqaudit.dta"
-# splits_dta_path = "$temp/splits.dta"
-# raw_csv_path = "$raw/reporter_dqaudit_2026-02-16.csv"
-
-# output_dta_pt1 = "$der/reporter_dqaudit_pt1.dta"
-# output_csv_pt1 = "$der/reporter_dqaudit_pt1.csv"
-# output_dta_pt2 = "$der/reporter_dqaudit_pt2.dta"
-# output_csv_pt2 = "$der/reporter_dqaudit_pt2.csv"
-
-# ==========================================
-# 1. Load, Drop Stata Date Formats, & Split
-# ==========================================
-df_07 = df_flat_exports.copy()
-# Drop the display-formatted Stata date columns
-date_drop_cols = [
-    "awd_not_date_date",
-    "bgt_end_date",
-    "bgt_strt_date",
-    "proj_end_date_date",
-    "proj_strt_date_date",
-]
-existing_drops = [c for c in date_drop_cols if c in df_07.columns]
-df_07 = df_07.drop(columns=existing_drops)
-
-# Save intermediate backup file
-df_07.to_csv(out / "splits.csv", index=False, quoting=1)  # 1 = csv.QUOTE_ALL
-
-# Replicates: keep if row <= 240
-# Python uses 0-indexed slicing (rows 0 up to 240 targets the first 240 items)
-# df_pt1 = df_split.iloc[:240]
-# df_pt1.to_stata(output_dta_pt1, write_index=False, version=118)
-# df_pt1.to_csv(output_csv_pt1, index=False, quoting=1)  # quoting=1 wraps entries in quotes
-
-# Replicates: keep if row > 240
-# df_pt2 = df_split.iloc[240:]
-# df_pt2.to_stata(output_dta_pt2, write_index=False, version=118)
-# df_pt2.to_csv(output_csv_pt2, index=False, quoting=1)
-
-
-# ==========================================
-# 2. Format Dates to Match MySQL Requirements
-# ==========================================
-# Load the raw input file using explicit string dtypes
-# raw_csv_path = "$raw/reporter_dqaudit_2026-02-16.csv"
-df_final = old_dqaudit.copy()
-
-# Replicates loop: gen x`var'=`var'+"T00:00:00" -> drop `var' -> rename x`var' `var'
-target_date_cols = ["proj_strt_date", "proj_end_date"]
-
-for col in target_date_cols:
-    if col in df_final.columns:
-        # Replicates string concatenation in Stata
-        df_final[col] = df_final[col].astype(str) + "T00:00:00"
-
-# Save the final table matching the production format requirements
-df_final.to_csv(out / "reporter_dqaudit.csv", index=False, quoting=1)  # 1 = csv.QUOTE_ALL
-
-print(
-    f"Processing complete. No Splits ({len(df_07)})."
-)
 
 
 

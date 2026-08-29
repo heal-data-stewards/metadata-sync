@@ -42,9 +42,9 @@ from typing import Optional, Tuple
 # ==============================================================================
 # 0. SET GLOBAL MACROS
 # ==============================================================================
-today = "20260615"
+today = "20260827"
 heal_dir = Path(
-    r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL"
+    # "SET PATH HERE"
 )
 
 # Inject into environment variables for child processes (convert Path to string)
@@ -119,41 +119,61 @@ logging.info("==================================================")
 # 3. RUN SEQUENTIAL SCRIPTS WITH ERROR HANDLING
 # ==============================================================================
 # List your scripts in the exact order they need to execute
+# HEAL_04 requires CLI arguments; build its invocation separately.
+# Set manual_matches_path to your study_manual_matches.xlsx file in Input/.
+manual_matches_path = str(heal_dir / "Input" / "study_manual_matches.xlsx")
+heal04_cmd = [
+    sys.executable, "HEAL_04_StudyTable.py",
+    "--mysql-data",        str(heal_dir / "Output" / f"mysql_{today}.csv"),
+    "--reporter-dqaudit",  str(heal_dir / "Output" / "reporter_dqaudit.csv"),
+    "--manual-matches",    manual_matches_path,
+    "--output-dir",        str(heal_dir / "Output"),
+    "--debug-dir",         str(heal_dir / "Output" / "debug"),
+]
+
+# Simple scripts (use env vars for today/dir; no extra CLI args needed)
 scripts_to_run = [
     "HEAL_01_ResNetDocTables.py"
     , "HEAL_02_ImportMerge.py"
     , "HEAL_03_DQAudit.py"
+    , "HEAL_05_EngagementTable.py"
+    , "HEAL_06_CompilebyStudy.py"
+    , "HEAL_07_QC.py"
+    , "HEAL_08_GTDTargets.py"
     , "HEAL_09_StudyMetrics.py"
     ]
 
-for script in scripts_to_run:
-    logging.info(f"Executing step: {script}...")
-
+def run_step(cmd, label):
+    logging.info(f"Executing step: {label}...")
     try:
-        # Run the script using the current Python environment
-        result = subprocess.run(
-            [sys.executable, script],
-            check=True,  # Raises CalledProcessError if the script crashes
-            capture_output=True,  # Captures internal print statements and errors
-            text=True,  # Returns output as clean text instead of raw bytes
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
         )
-
-        logging.info(f"SUCCESS: {script} completed cleanly.")
-
+        logging.info(f"SUCCESS: {label} completed cleanly.")
     except subprocess.CalledProcessError as e:
-        logging.error(f"CRITICAL CRASH: {script} failed with exit code {e.returncode}!")
+        logging.error(f"CRITICAL CRASH: {label} failed with exit code {e.returncode}!")
         logging.error("----- PYTHON ERROR LOG BELOW -----")
-        logging.error(
-            e.stderr if e.stderr else "No error text captured (check terminal)."
-        )
+        logging.error(e.stderr if e.stderr else "No error text captured (check terminal).")
         logging.error("----------------------------------")
         logging.error("Pipeline execution halted to prevent data corruption.")
-        sys.exit(1)  # Stop the master script entirely
-    except FileNotFoundError:
-        logging.error(
-            f"CRITICAL CRASH: Could not find the file '{script}' in this folder!"
-        )
         sys.exit(1)
+    except FileNotFoundError:
+        logging.error(f"CRITICAL CRASH: Could not find '{label}'!")
+        sys.exit(1)
+
+# Steps 01-03: produce mysql_{today}.csv and reporter_dqaudit.csv
+for script in scripts_to_run[:3]:
+    run_step([sys.executable, script], script)
+
+# Step 04: StudyTable (needs explicit CLI args)
+run_step(heal04_cmd, "HEAL_04_StudyTable.py")
+
+# Steps 05-09: downstream consumers
+for script in scripts_to_run[3:]:
+    run_step([sys.executable, script], script)
 
 logging.info("==================================================")
 logging.info("SUCCESS: All pipeline steps completed successfully!")

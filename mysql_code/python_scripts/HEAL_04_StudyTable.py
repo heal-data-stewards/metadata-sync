@@ -101,6 +101,7 @@ def build_study_lookup_table(
     manual_matches_df: Optional[pd.DataFrame] = None,
     export_debug: Optional[Path] = None,
     track_appl_ids: Optional[list] = None,
+    output_dir: Optional[Path] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Recreate HEAL_04_StudyTable.do logic in Python."""
     mysql_df = mysql_df.copy()
@@ -490,10 +491,17 @@ def build_study_lookup_table(
         manual_template.to_csv(export_debug / "step5e_manual_match_template.csv", index=False)
 
     if manual_matches_df is None:
-        raise ValueError(
-            "Manual match file is required to complete full study_id assignment for the unmatched studyidbad records. "
-            "Provide --manual-matches <path> to continue."
+        import sys
+        # Always write template to output_dir so it's easy to find
+        if output_dir is not None:
+            template_out = output_dir / "step5e_manual_match_template.csv"
+            manual_template.to_csv(template_out, index=False)
+            print(f"Manual match template written to: {template_out}")
+        print(
+            "\nSTOP: Fill in step5e_manual_match_template.csv, save as study_manual_matches.xlsx, "
+            "then re-run with --manual-matches <path> to complete HEAL_04."
         )
+        sys.exit(0)
 
     manual = manual_matches_df.copy()
     manual_columns = [c for c in [
@@ -617,8 +625,9 @@ def build_study_lookup_table(
     
 
     mysql_studyid = mysql_hasappls_df.copy()
-    
-    mysql_studyid.to_csv(export_debug/"mysql_studyid_0.csv", index=False)
+
+    if export_debug is not None:
+        mysql_studyid.to_csv(export_debug/"mysql_studyid_0.csv", index=False)
     _trace("mysql_studyid_0", mysql_studyid, track_appl_ids or [])
 
     mysql_studyid = mysql_studyid.merge(
@@ -626,13 +635,15 @@ def build_study_lookup_table(
         on="compound_key",
         how="left",
     )
-    mysql_studyid.to_csv(export_debug/"mysql_studyid_1.csv", index=False)
+    if export_debug is not None:
+        mysql_studyid.to_csv(export_debug/"mysql_studyid_1.csv", index=False)
     _trace("mysql_studyid_1", mysql_studyid, track_appl_ids or [])
-    
+
     mysql_studyid = mysql_studyid.sort_values(["study_id_final", "appl_id", "hdp_id"])
     mysql_studyid = mysql_studyid.drop(columns=["study_id", "xstudy_id_stewards"], errors="ignore")
     print(f"Number of records in mysql_studyid: {len(mysql_studyid)}") # Match 2951
-    mysql_studyid.to_csv(export_debug/"mysql_studyid_2.csv", index=False)
+    if export_debug is not None:
+        mysql_studyid.to_csv(export_debug/"mysql_studyid_2.csv", index=False)
     _trace("mysql_studyid_2", mysql_studyid, track_appl_ids or [])
 
 
@@ -646,7 +657,8 @@ def build_study_lookup_table(
         missing_final = mysql_studyid["study_id_final"].isna() & mysql_studyid["xstudy_id_final"].notna()
         mysql_studyid.loc[missing_final, "study_id_final"] = mysql_studyid.loc[missing_final, "xstudy_id_final"]
         mysql_studyid.drop(columns=["xstudy_id_final"], inplace=True)
-        mysql_studyid.to_csv(export_debug/"mysql_studyid_3.csv", index=False)
+        if export_debug is not None:
+            mysql_studyid.to_csv(export_debug/"mysql_studyid_3.csv", index=False)
         _trace("mysql_studyid_3", mysql_studyid, track_appl_ids or [])
 
 
@@ -868,16 +880,17 @@ def main():
 
     track_ids = [x.strip() for x in args.track_appl_ids.split(",")] if args.track_appl_ids else []
 
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     study_table, study_table_dd, manual_template = build_study_lookup_table(
         mysql_df,
         reporter_dqaudit_df,
         manual_matches_df=manual_matches_df,
         export_debug=debug_dir,
         track_appl_ids=track_ids,
+        output_dir=output_dir,
     )
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     study_table.to_csv(output_dir / "study_lookup_table.csv", index=False)
     study_table_dd.to_csv(output_dir / "study_table_dd.csv", index=False)
     manual_template.to_csv(output_dir / "step5e_manual_match_template.csv", index=False)
