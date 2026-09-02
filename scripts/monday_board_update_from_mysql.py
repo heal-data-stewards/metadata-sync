@@ -164,6 +164,63 @@ def compare_study_lookup_monday(
 
 
 # ---------------------------------------------------------------------------
+# Research Focus comparison against previous Monday board
+# ---------------------------------------------------------------------------
+
+def compare_research_focus(
+    study_summary_df: pd.DataFrame,
+    monday_board: pd.DataFrame,
+    output_dir: Path,
+) -> None:
+    """
+    For studies present in both study_summary and the Monday board export,
+    compare the Research Focus value and log/export any differences.
+    """
+    if "Research Focus" not in study_summary_df.columns:
+        logging.warning("Research Focus column not found in study_summary — skipping comparison")
+        return
+    if "Research Focus" not in monday_board.columns:
+        logging.warning("Research Focus column not found in Monday board export — skipping comparison")
+        return
+
+    new_rf = (
+        study_summary_df[["key", "Research Focus"]]
+        .drop_duplicates(subset="key")
+        .rename(columns={"Research Focus": "Research Focus (new)"})
+    )
+    old_rf = (
+        monday_board[["Name", "Research Focus"]]
+        .drop_duplicates(subset="Name")
+        .rename(columns={"Research Focus": "Research Focus (Monday)"})
+    )
+
+    merged = pd.merge(new_rf, old_rf, left_on="key", right_on="Name", how="inner").drop(columns="Name")
+
+    def _norm(v):
+        return str(v).strip() if not pd.isna(v) else ""
+
+    merged["changed"] = merged.apply(
+        lambda r: _norm(r["Research Focus (new)"]) != _norm(r["Research Focus (Monday)"]),
+        axis=1,
+    )
+
+    changed = merged[merged["changed"]].drop(columns="changed")
+    unchanged_count = (~merged["changed"]).sum()
+
+    logging.info(
+        "Research Focus comparison: %d unchanged, %d changed",
+        unchanged_count, len(changed),
+    )
+    if len(changed) > 0:
+        logging.warning(
+            "Research Focus values that changed (key | new | Monday):\n%s",
+            changed.to_string(index=False),
+        )
+        changed.to_csv(output_dir / "research_focus_changes.csv", index=False)
+        logging.info("Wrote research_focus_changes.csv")
+
+
+# ---------------------------------------------------------------------------
 # Email backfill from Monday board  (preserved from scripts/monday_board_update.py)
 # ---------------------------------------------------------------------------
 
@@ -184,6 +241,12 @@ def backfill_emails_from_monday(
     )
     monday_emails["Contact Email"] = (
         monday_emails["Contact Email"].replace("-", "").fillna("")
+    )
+    # Guarantee one row per Most Recent Appl_ID before the join; prefer non-empty email.
+    monday_emails = (
+        monday_emails
+        .sort_values("Contact Email", ascending=False)
+        .drop_duplicates(subset="Most Recent Appl_ID", keep="first")
     )
 
     merged = pd.merge(
@@ -382,31 +445,40 @@ def create_monday_update_file(
     # ---- STEP 3: Compare study_summary keys vs Monday board ----
     logging.info("---- STEP 3: Comparing study_summary with Monday Board")
     mondayboard_missing_in_lookup, lookup_fields = compare_study_lookup_monday(df, monday_board)
+    compare_research_focus(df, monday_board, output_dir)
 
     # ---- STEP 4: Backfill emails from Monday board ----
     logging.info("---- STEP 4: Backfilling any missing emails from Monday Board")
     df = backfill_emails_from_monday(df, monday_board, output_dir)
 
-    # Report research network distribution
-    resnet_col = "Research Network" if "Research Network" in df.columns else "research_network"
-    logging.info(
-        "Research network distribution:\n%s",
-        df[resnet_col].value_counts().to_string() if resnet_col in df.columns else "(column not found)",
-    )
-
     # ---- STEP 5: Final column renames + cleanup ----
     logging.info("---- STEP 5: Final column renames for Monday Board")
     final_dataset = _prep_for_export(df)
 
-    # ---- STEP 6: QC — NA counts ----
-    logging.info("---- STEP 6: Fields with empty values in final dataset")
+    # ---- STEP 6: Distribution summary ----
+    logging.info("---- STEP 6: Distribution summary")
+    st_col = "study_type" if "study_type" in final_dataset.columns else None
+    if st_col:
+        logging.info(
+            "Counts for study types in the final dataset:\n%s",
+            final_dataset[st_col].value_counts().to_string(),
+        )
+    resnet_col = "Research Network" if "Research Network" in final_dataset.columns else "research_network"
+    if resnet_col in final_dataset.columns:
+        logging.info(
+            "Research network distribution:\n%s",
+            final_dataset[resnet_col].value_counts().to_string(),
+        )
+
+    # ---- STEP 7: QC — NA counts ----
+    logging.info("---- STEP 7: Fields with empty values in final dataset")
     na_counts = {k: int(pd.isna(final_dataset[k]).sum()) for k in final_dataset.columns}
     na_nonzero = {k: v for k, v in na_counts.items() if v > 0}
     import pprint
     logging.info("Fields and NA counts:\n%s", pprint.pformat(na_nonzero))
 
-    # ---- STEP 7: Final numbers and export ----
-    logging.info("---- STEP 7: Final numbers and Export")
+    # ---- STEP 8: Final numbers and export ----
+    logging.info("---- STEP 8: Final numbers and Export")
     export_finaldata(output_dir, final_dataset, mondayboard_missing_in_lookup, monday_board)
 
 

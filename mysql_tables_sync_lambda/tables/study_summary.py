@@ -119,6 +119,12 @@ def _read_table(conn, table: str) -> pd.DataFrame:
     cols = [d[0] for d in cur.description]
     df = pd.DataFrame(cur.fetchall(), columns=cols)
     cur.close()
+    # MySQL SET columns are returned as Python sets by mysql.connector; flatten to strings.
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].apply(
+                lambda v: ",".join(sorted(v)) if isinstance(v, set) else v
+            )
     if "appl_id" in df.columns:
         df["appl_id"] = df["appl_id"].astype(str)
     return df
@@ -147,6 +153,15 @@ def _build_pi_emails(gt_file: pd.DataFrame, pi_emails_df: pd.DataFrame) -> pd.Da
     ]
     result = merged[merged["keep"] == 1][["study_most_recent_appl", "pi_email"]].drop_duplicates()
     result["pi_email"] = result["pi_email"].str.strip()
+    # Guarantee one row per study_most_recent_appl; prefer non-empty email.
+    # Without this, studies where appl_id == study_most_recent_appl (e.g. CTN) that have
+    # multiple pi_email rows all pass the a==m guard above, causing JOIN row explosion.
+    result = (
+        result
+        .sort_values("pi_email", ascending=False)
+        .drop_duplicates(subset="study_most_recent_appl", keep="first")
+        .reset_index(drop=True)
+    )
     return result
 
 
