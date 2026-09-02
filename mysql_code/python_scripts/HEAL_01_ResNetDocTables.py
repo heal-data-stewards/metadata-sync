@@ -107,6 +107,13 @@ for tab in tabs:
 res_net_ref_table = dfs['res_net_ref_table']
 res_net_override = dfs['res_net_value_overrides_byappl']
 
+# Excel reads numeric appl_ids as float → "10684372.0"; strip the .0 so they match awards
+res_net_override['appl_id'] = (
+    res_net_override['appl_id']
+    .str.replace(r'\.0$', '', regex=True)
+    .str.strip()
+)
+
 print(f"Loaded {len(res_net_ref_table)} rows into res_net_ref_table")
 
 

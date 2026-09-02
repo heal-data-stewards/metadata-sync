@@ -283,8 +283,9 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     # Location: City, State
-    city  = d["City"].fillna("") if "City" in d.columns else ""
-    state = d["State"].fillna("") if "State" in d.columns else ""
+    empty = pd.Series([""] * len(d), index=d.index)
+    city  = d["City"].fillna("") if "City" in d.columns else empty
+    state = d["State"].fillna("") if "State" in d.columns else empty
     d["Location"] = [f"{c},{s}" for c, s in zip(city, state)]
 
     # Date normalisation
@@ -304,7 +305,7 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
 
     if "HEAL-Related" in d.columns:
         d["HEAL-Related"] = [
-            "Y" if (st != "CTN" and pd.isna(a)) else "N"
+            "Y" if (st != "CTN" and pd.notna(a) and float(a) == 1) else "N"
             for st, a in d[["study_type", "HEAL-Related"]].values
         ]
 
@@ -312,10 +313,10 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
         d["SBIR/STTR"] = ["Y" if t == "SBIR/STTR" else "N" for t in d["SBIR/STTR"]]
 
     if "Checklist Exempt" in d.columns:
-        d["Checklist Exempt"] = ["Y" if t == 1 else "N" for t in d["Checklist Exempt"]]
+        d["Checklist Exempt"] = ["Y" if str(t) == "1" else "N" for t in d["Checklist Exempt"]]
 
     if "Do not Engage" in d.columns:
-        d["Do not Engage"] = ["Y" if t == 1 else "N" for t in d["Do not Engage"]]
+        d["Do not Engage"] = ["Y" if str(t) == "1" else "N" for t in d["Do not Engage"]]
 
     # Drop join-artifact columns; keep study_hdp_id (useful for queries)
     d.drop(columns=["hdp_id", "hdp_id_x", "hdp_id_y"], errors="ignore", inplace=True)
