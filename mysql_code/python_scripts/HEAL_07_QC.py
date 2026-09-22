@@ -39,14 +39,14 @@ from openpyxl.styles import Font, PatternFill
 # ==============================================================================
 # 0. SET GLOBAL MACROS
 # ==============================================================================
-today = "20260615"
-heal_dir = Path(
-    r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL"
-)
+# today = "20260615"
+# heal_dir = Path(
+#     r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL"
+# )
 
-# Inject into environment variables for child processes (convert Path to string)
-os.environ["today"] = today
-os.environ["dir"] = str(heal_dir)
+# # Inject into environment variables for child processes (convert Path to string)
+# os.environ["today"] = today
+# os.environ["dir"] = str(heal_dir)
 # END TEMPORARY UNTIL INCLUDED in MASTER
 
 
@@ -64,6 +64,7 @@ inp = dir / "Input"
 out = dir / "Output"
 log = dir / "Log"
 qc = out / "QC"
+qc.mkdir(parents=True, exist_ok=True)
 
 # Logging
 log_path = os.path.join(log, f"HEAL_07_QC_{today}_log.txt")
@@ -80,23 +81,6 @@ log_out(f"HEAL_07_QC Log Run Date: {today}")
 # ----- END Boiler Plate Code -----------------------------------------------------*/
 
 
-
-
-
-# ==============================================================================
-# 0. Environment Setup & Configuration
-# ==============================================================================
-
-# Target report path (Changed extension to .xlsx)
-report_path = os.path.join(qc, f"QCReport_{today}.xlsx")
-
-# Initialize OpenPyXL Workbook
-wb = Workbook()
-
-# Get the active sheet to start writing data
-ws = wb.active
-ws.title = "QC Report"  # Optional: Give your sheet a custom name
-wb.save(f"{qc}/QCReport_{today}.xlsx")
 
 
 

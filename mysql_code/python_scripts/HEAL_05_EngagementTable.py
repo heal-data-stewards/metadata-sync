@@ -44,12 +44,12 @@ from openpyxl import load_workbook
 # ----- SET MACROS -----*/
 
 # ----- 1. Dates ----- */
-today = "20260612"
+today = os.environ.get("today")
 # today = date.today().strftime("%Y-%m-%d")
 print(today)
 
 # ----- 2. Filepaths ----- */
-dir = Path(r"C:\Users\berman\OneDrive - Research Triangle Institute\Python Environment\HEAL") #WINDOwS
+dir = Path(os.environ.get("dir"))
 inp = dir / "Input"
 out = dir / "Output"
 log = dir / "Log"
@@ -132,39 +132,52 @@ log_out(f"Import Research Networks: {str(df_net.shape)}")
 
 
 # Merge 1:1 on appl_id
-df_flags = pd.merge(df_nih, df_net, on="appl_id", how="outer", indicator=True)
+df_flags_00 = pd.merge(df_nih, df_net, on="appl_id", how="outer", indicator=True)
 
 # Drop rows that are only in the using dataset (Stata _merge == 2)
-df_flags = df_flags[df_flags["_merge"] != "right_only"].drop(columns=["_merge"])
+df_flags_01 = df_flags_00[df_flags_00["_merge"] != "right_only"].drop(columns=["_merge"])
+
+df_flags_02 = df_flags_01[["appl_id", "res_net", "res_net_override_flag", "act_code", "nih_noa_heal_lang", "nih_foa_heal_lang", "nih_aian","proj_title","fund_mech","nih_noa_notes"]].copy()
 
 # Clean res_net column
-df_flags["res_net"] = df_flags["res_net"].astype(str).str.upper()
+# df_flags["res_net"] = df_flags["res_net"].astype(str).str.upper()
+df_flags_02["res_net"] = df_flags_02["res_net"].astype(str).str.upper().replace("NAN", np.nan)
 
 # Drop res_net_override_flag if it exists
-if "res_net_override_flag" in df_flags.columns:
-    df_flags = df_flags.drop(columns=["res_net_override_flag"])
+if "res_net_override_flag" in df_flags_02.columns:
+    df_flags_03 = df_flags_02.drop(columns=["res_net_override_flag"])
 
 # Initialize do_not_engage flag
-df_flags["do_not_engage"] = 0
+df_flags_03["do_not_engage"] = 0
 
+
+df_flags_04 = df_flags_03.copy()
 # Condition 1: act_code in T90, R90, K99
-df_flags.loc[df_flags["act_code"].isin(["T90", "R90", "K99"]), "do_not_engage"] = 1
+df_flags_04.loc[df_flags_04["act_code"].isin(["T90", "R90", "K99"]), "do_not_engage"] = 1
 
+
+df_flags_05 = df_flags_04.copy()
 # Condition 2: HEAL language equals "0" (ignoring nulls)
-df_flags.loc[
-    (df_flags["nih_foa_heal_lang"] == "0") | (df_flags["nih_noa_heal_lang"] == "0"),
-    "do_not_engage",
-] = 1
+heal_zero_condition = (
+    df_flags_05["nih_foa_heal_lang"].isin(["0", 0]) | 
+    df_flags_05["nih_noa_heal_lang"].isin(["0", 0])
+)
+df_flags_05.loc[heal_zero_condition, "do_not_engage"] = 1
 
+df_flags_06 = df_flags_05.copy()
 # Condition 3: nih_aian equals "1"
-df_flags.loc[df_flags["nih_aian"] == "1", "do_not_engage"] = 1
+df_flags_06.loc[df_flags_06["nih_aian"] == "1", "do_not_engage"] = 1
 
 # Condition 4: MEDTECH containing "Seedling" in title
 # case=True matches Stata's ustrpos behavior
-is_medtech = df_flags["res_net"] == "MEDTECH"
-has_seedling = df_flags["proj_title"].astype(str).str.contains("Seedling", case=True, na=False)
-df_flags.loc[is_medtech & has_seedling, "do_not_engage"] = 1
 
+df_flags_07 = df_flags_06.copy()
+is_medtech = df_flags_07["res_net"] == "MEDTECH"
+has_seedling = df_flags_07["proj_title"].astype(str).str.contains("Seedling", case=True, na=False)
+df_flags_07.loc[is_medtech & has_seedling, "do_not_engage"] = 1
+
+
+df_flags = df_flags_07.copy()
 # Initialize checklist_exempt_all flag
 df_flags["checklist_exempt_all"] = 0
 

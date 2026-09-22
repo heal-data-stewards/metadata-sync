@@ -65,10 +65,10 @@ from openpyxl import load_workbook
 # ----- 1. Dates ----- */
 today = os.environ.get("today")
 
-# today = date.today().strftime("%Y-%m-%d")
-print(today)
 # ----- 2. Filepaths ----- */
+# dir = heal_dir
 dir = Path(os.environ.get("dir"))
+
 inp = dir / "Input"
 out = dir / "Output"
 log = dir / "Log"
@@ -235,7 +235,6 @@ log_out(f"Progress Tracker table after dropping records where appl_id is blank: 
 
 
 
-
 # * -- CTN Protocols -- *;
 # * Create new CTN variables*;
 # * Remove CTN values from appl_id and project_num fields *;
@@ -350,7 +349,9 @@ log_out(f"df_awards_01: {df_awards_01.shape}")
 # /* ----- 4. Merge data ----- */
 # * Merge awards reporter *;
 df_reporter_01 = df_reporter_00[df_reporter_00['appl_id'].astype(str).str.strip() != ""]
-# df_awards_01 = df_awards_00.copy()
+# df_awards_01 carries forward from section 3 (foa/noa cleaning + correct_foanoa merge).
+# Do NOT re-initialise from df_awards_00 here — that would discard the cleaned values
+# and let MySQL's spurious 0s (exported in place of NULL) through into the output.
 df_res_net_01 = df_res_net_00.copy()
 
 # merge 1:1 appl_id
@@ -431,10 +432,9 @@ date_vars = ['awd_not_date', 'bgt_end', 'bgt_strt', 'proj_end_date', 'proj_strt_
 
 for var in date_vars:
     # gen x`var'=substr(`var',1,10) & gen `var'_date=date(x`var',"YMD")
-    # pd.to_datetime handles the first 10 chars automatically if format is YYYY-MM-DD
     new_col = f'{var}_date'
     mysql_today_00[new_col] = pd.to_datetime(mysql_today_00[var].astype(str).str[:10], errors='coerce')
-    
+
     # Reorder: order `var'_date, after(`var')
     current_cols = list(mysql_today_00.columns)
     var_idx = current_cols.index(var)
@@ -451,6 +451,12 @@ mysql_today_00['compound_key'] = (
     mysql_today_00['hdp_id'].fillna('').astype(str).str.replace(r'\.0$', '', regex=True)
 )
 
+
+# Standardise column names to match Stata (Stata lowercases and strips spaces on import)
+mysql_today_00 = mysql_today_00.rename(columns={
+    'Registering user':       'registeringuser',
+    'clinical_trials_study_ID': 'clinical_trials_study_id',
+})
 
 # Save
 mysql_today_00.to_csv(os.path.join(out, f'mysql_{today}.csv'), index=False, quoting=1)

@@ -119,6 +119,12 @@ def _read_table(conn, table: str) -> pd.DataFrame:
     cols = [d[0] for d in cur.description]
     df = pd.DataFrame(cur.fetchall(), columns=cols)
     cur.close()
+    # MySQL SET columns are returned as Python sets by mysql.connector; flatten to strings.
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].apply(
+                lambda v: ",".join(sorted(v)) if isinstance(v, set) else v
+            )
     if "appl_id" in df.columns:
         df["appl_id"] = df["appl_id"].astype(str)
     return df
@@ -147,6 +153,15 @@ def _build_pi_emails(gt_file: pd.DataFrame, pi_emails_df: pd.DataFrame) -> pd.Da
     ]
     result = merged[merged["keep"] == 1][["study_most_recent_appl", "pi_email"]].drop_duplicates()
     result["pi_email"] = result["pi_email"].str.strip()
+    # Guarantee one row per study_most_recent_appl; prefer non-empty email.
+    # Without this, studies where appl_id == study_most_recent_appl (e.g. CTN) that have
+    # multiple pi_email rows all pass the a==m guard above, causing JOIN row explosion.
+    result = (
+        result
+        .sort_values("pi_email", ascending=False)
+        .drop_duplicates(subset="study_most_recent_appl", keep="first")
+        .reset_index(drop=True)
+    )
     return result
 
 
@@ -283,8 +298,9 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     # Location: City, State
-    city  = d["City"].fillna("") if "City" in d.columns else ""
-    state = d["State"].fillna("") if "State" in d.columns else ""
+    empty = pd.Series([""] * len(d), index=d.index)
+    city  = d["City"].fillna("") if "City" in d.columns else empty
+    state = d["State"].fillna("") if "State" in d.columns else empty
     d["Location"] = [f"{c},{s}" for c, s in zip(city, state)]
 
     # Date normalisation
@@ -304,7 +320,7 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
 
     if "HEAL-Related" in d.columns:
         d["HEAL-Related"] = [
-            "Y" if (st != "CTN" and pd.isna(a)) else "N"
+            "Y" if (st != "CTN" and pd.notna(a) and float(a) == 1) else "N"
             for st, a in d[["study_type", "HEAL-Related"]].values
         ]
 
@@ -312,10 +328,10 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
         d["SBIR/STTR"] = ["Y" if t == "SBIR/STTR" else "N" for t in d["SBIR/STTR"]]
 
     if "Checklist Exempt" in d.columns:
-        d["Checklist Exempt"] = ["Y" if t == 1 else "N" for t in d["Checklist Exempt"]]
+        d["Checklist Exempt"] = ["Y" if str(t) == "1" else "N" for t in d["Checklist Exempt"]]
 
     if "Do not Engage" in d.columns:
-        d["Do not Engage"] = ["Y" if t == 1 else "N" for t in d["Do not Engage"]]
+        d["Do not Engage"] = ["Y" if str(t) == "1" else "N" for t in d["Do not Engage"]]
 
     # Drop join-artifact columns; keep study_hdp_id (useful for queries)
     d.drop(columns=["hdp_id", "hdp_id_x", "hdp_id_y"], errors="ignore", inplace=True)
