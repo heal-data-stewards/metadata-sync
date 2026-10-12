@@ -30,6 +30,8 @@ db_password = os.getenv('DB_PASSWORD')
 db_host     = os.getenv('DB_HOST')
 db_database = os.getenv('DB_NAME')
 table_name  = os.getenv('TABLE_NAME')
+# Same table + fallback used by mysql_tables_sync_lambda and query_mysql_tables_lambda.
+study_summary_table_name = os.getenv('STUDY_SUMMARY_TABLE_NAME', 'study_summary_test')
 
 _HEADERS = {
     "Content-Type": "application/json",
@@ -53,7 +55,7 @@ def _count(cursor, table, where):
 # Dashboard metrics query
 # ---------------------------------------------------------------------------
 
-def get_dashboard_metrics(conn, table):
+def get_dashboard_metrics(conn, table, study_summary_table=study_summary_table_name):
     """
     Returns aggregate counts from progress_tracker for the HEAL dashboard.
 
@@ -144,13 +146,15 @@ def get_dashboard_metrics(conn, table):
     """)
     repositories = [{"name": r[0], "count": r[1]} for r in cur.fetchall()]
 
-    # ── Research network breakdown (from monday_studies_mysql) ───────────────
-    # Populated by monday_studies_lambda/lambda_function.py.
-    # Gracefully returns [] if the table doesn't exist yet.
+    # ── Research network breakdown (from study_summary) ──────────────────────
+    # Was monday_studies_mysql (populated by monday_studies_lambda), repointed
+    # at study_summary.research_network 2026-10-12 -- same values (uppercase
+    # network codes, 'CTN' literal), built by mysql_tables_sync_lambda instead.
+    # Kept defensive: a broken breakdown query must not 500 the whole endpoint.
     try:
-        cur.execute("""
+        cur.execute(f"""
             SELECT research_network, COUNT(*) AS cnt
-            FROM monday_studies_mysql
+            FROM {study_summary_table}
             WHERE research_network IS NOT NULL
               AND research_network != ''
               AND research_network != '-'
