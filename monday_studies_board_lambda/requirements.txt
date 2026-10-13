@@ -1,0 +1,6 @@
+boto3
+mysql-connector-python
+pandas
+python-dotenv
+requests
+xlsxwriter

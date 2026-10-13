@@ -1,0 +1,7 @@
+boto3
+httpx
+openpyxl
+pandas
+python-dotenv
+requests
+xlsxwriter
