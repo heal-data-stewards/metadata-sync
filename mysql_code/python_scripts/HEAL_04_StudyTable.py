@@ -689,6 +689,7 @@ def build_study_lookup_table(
     # Use bgt_end (not bgt_end_date): HEAL_03 drops the _date columns from reporter_dqaudit.csv
     # so bgt_end is the only column consistently populated for both reporter and reporter_dqaudit.
     recent["bgt_end_date_parsed"] = recent["bgt_end"].apply(parse_ymd_date)
+
     recent["latest_bgt_end"] = recent.groupby("study_id_final")["bgt_end_date_parsed"].transform("max")
     recent = recent[(recent["latest_bgt_end"] == recent["bgt_end_date_parsed"]) | (recent["bgt_end_date_parsed"].isna() & recent["latest_bgt_end"].isna())].copy()
     print(f"  [step7 diag] after latest_bgt_end filter: {len(recent)}")
