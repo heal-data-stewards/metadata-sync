@@ -6,17 +6,19 @@ on:
       - develop
       - main
     paths:
-      - 'mysql_tables_sync_lambda/**'
-      - 'query_mysql_tables_lambda/**'
+      - "mysql_tables_sync_lambda/**"
+      - "query_mysql_tables_lambda/**"
+      - "monday_package_board_lambda/**"
+      - "monday_studies_board_lambda/**"
       # - 'src/function-c/**'   # Add all your Lambda folders here
 
 permissions:
-  id-token: write             # Required for OIDC
+  id-token: write # Required for OIDC
   contents: read
 
 env:
-  AWS_REGION: us-east-1                                                    # Your AWS region
-  AWS_ROLE_ARN: arn:aws:iam::339712780658:role/github-actions-metadata-sync-role   # Your IAM role ARN
+  AWS_REGION: us-east-1 # Your AWS region
+  AWS_ROLE_ARN: arn:aws:iam::339712780658:role/github-actions-metadata-sync-role # Your IAM role ARN
 
 jobs:
   # Determines which Lambda directory actually changed, using a real
@@ -29,6 +31,8 @@ jobs:
     outputs:
       mysql_tables_sync: ${{ steps.filter.outputs.mysql_tables_sync }}
       query_mysql_tables: ${{ steps.filter.outputs.query_mysql_tables }}
+      monday_package_board: ${{ steps.filter.outputs.monday_package_board }}
+      monday_studies_board: ${{ steps.filter.outputs.monday_studies_board }}
       # function_c: ${{ steps.filter.outputs.function_c }}
     steps:
       - uses: actions/checkout@v3
@@ -40,6 +44,10 @@ jobs:
               - 'mysql_tables_sync_lambda/**'
             query_mysql_tables:
               - 'query_mysql_tables_lambda/**'
+            monday_package_board:
+              - 'monday_package_board_lambda/**'
+            monday_studies_board:
+              - 'monday_studies_board_lambda/**'
             # function_c:
             #   - 'src/function-c/**'   # Add a filter entry per Lambda folder
 
@@ -126,6 +134,88 @@ jobs:
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
 
+  deploy-monday-package-board:
+    needs: changes
+    if: needs.changes.outputs.monday_package_board == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine target function
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "FUNCTION_NAME=monday_package_board" >> "$GITHUB_ENV"
+          else
+            echo "FUNCTION_NAME=monday_package_board_test" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package Lambda
+        run: |
+          cd monday_package_board_lambda   # real lambda dirs here sit at repo root
+          zip -r ../monday_package_board_lambda.zip .   # (1 level deep) — one ../, not two
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://monday_package_board_lambda.zip
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+  deploy-monday-studies-board:
+    needs: changes
+    if: needs.changes.outputs.monday_studies_board == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine target function
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "FUNCTION_NAME=monday_studies_board" >> "$GITHUB_ENV"
+          else
+            echo "FUNCTION_NAME=monday_studies_board_test" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package Lambda
+        run: |
+          cd monday_studies_board_lambda   # real lambda dirs here sit at repo root
+          zip -r ../monday_studies_board_lambda.zip .   # (1 level deep) — one ../, not two
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://monday_studies_board_lambda.zip
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+  # # Copy and paste the job block below for each additional Lambda function,
+  # # and add its filter entry to the `changes` job's `filters:` above, plus
+  # # its own path under `on.push.paths:` at the top of this file.
+
   # develop -> function_c_test, main -> function_c (production)
   # deploy-function-c:
   #   needs: changes
@@ -170,7 +260,3 @@ jobs:
   #       run: |
   #         aws lambda wait function-updated \
   #           --function-name "$FUNCTION_NAME"
-
-  # # Copy and paste the job block above for each additional Lambda function,
-  # # and add its filter entry to the `changes` job's `filters:` above, plus
-  # # its own path under `on.push.paths:` at the top of this file.
