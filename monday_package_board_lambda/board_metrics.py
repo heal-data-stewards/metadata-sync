@@ -25,6 +25,14 @@ def build_cde_board_metrics(
     hss_df = pd.DataFrame.from_dict(hss_counts, orient="index").reset_index(names="HDPID")
 
     # Outer join: a study can have HSS mappings without report rows, or vice versa.
+    # Deliberately NOT widened to every HDPID in hss_section_counts (HSS's full
+    # studies index, ~1100+ studies) -- this per_study table is also used
+    # standalone for the Data Reuse board (to_data_reuse_columns), which has no
+    # separate filter, so widening it here would silently balloon that board to
+    # every HEAL study rather than just ones with CDE report/mapping activity.
+    # See assemble_boards.build_data_package_board()'s own hss_section_counts
+    # handling for the narrower fix that keeps the Data Package board's
+    # num_sections accurate without changing this table's row universe.
     merged = pd.merge(per_study, hss_df, how="outer", on="HDPID")
     for col in ["num_variable_cde_mappings", "num_distinct_cde_measures", "num_cde_forms_from_mapping"]:
         merged[col] = merged[col].fillna(0).astype(int)

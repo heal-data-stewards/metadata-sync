@@ -92,7 +92,7 @@ def run(input_source, output_source) -> dict:
     )
     links = build_data_package_links(mds_links, platform_assessments, hss_study_counts)
 
-    data_package_board = build_data_package_board(links, per_study)
+    data_package_board = build_data_package_board(links, per_study, hss_section_counts)
     data_reuse_board = build_data_reuse_board(per_study)
 
     today = date.today().strftime("%Y-%m-%d")
