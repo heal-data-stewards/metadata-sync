@@ -55,9 +55,8 @@ S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
 OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "monday_studies_board/outputs")
 STUDY_SUMMARY_TABLE = os.getenv("STUDY_SUMMARY_TABLE", "study_summary")
 
-# Monday's import row limit, per batch file. Matches the already-in-use
-# monday_studies_lambda/monday_board_update.py ("v2") precedent.
-BATCH_SIZE = 1400
+# Monday's import row limit, per batch file.
+BATCH_SIZE = 1000
 
 
 def read_study_summary(conn, table: str = STUDY_SUMMARY_TABLE) -> pd.DataFrame:

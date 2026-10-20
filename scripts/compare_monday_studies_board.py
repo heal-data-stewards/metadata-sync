@@ -35,7 +35,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 1400  # matches monday_studies_board_lambda
+BATCH_SIZE = 1000  # matches monday_studies_board_lambda
 
 # Pseudo-rows Monday's own UI export includes that aren't real studies.
 _SECTION_HEADER_ROWS = [
