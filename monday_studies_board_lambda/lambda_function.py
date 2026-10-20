@@ -42,7 +42,7 @@ import boto3
 import pandas as pd
 from dotenv import load_dotenv
 
-from column_mapping import DROP_COLUMNS, KEY_COLUMN, MYSQL_TO_DISPLAY, PASSTHROUGH_RENAME
+from column_mapping import DATE_COLUMNS, DROP_COLUMNS, KEY_COLUMN, MYSQL_TO_DISPLAY, PASSTHROUGH_RENAME
 from db import connect_mysql
 from notify import notify_slack
 
@@ -77,10 +77,16 @@ def prepare_for_export(df: pd.DataFrame) -> pd.DataFrame:
     """
     Final column renames + the Monday-upload blank failsafe. No re-derivation
     of study_type/Location/dates/flags -- study_summary already did that.
+
+    Date-type Monday columns (DATE_COLUMNS) are exempt from the dash fill: a
+    literal "-" isn't a parseable date, so Monday's import wouldn't write it
+    to the cell anyway -- it'd just silently drop it, which both defeats the
+    failsafe's point and makes the source file look like it has real dashes
+    where it doesn't. Left genuinely blank instead.
     """
     d = df.rename(columns=PASSTHROUGH_RENAME).drop(columns=DROP_COLUMNS, errors="ignore")
 
-    value_columns = [c for c in d.columns if c != KEY_COLUMN]
+    value_columns = [c for c in d.columns if c != KEY_COLUMN and c not in DATE_COLUMNS]
     d[value_columns] = d[value_columns].fillna("-")
     d[value_columns] = d[value_columns].replace("", "-")
 
