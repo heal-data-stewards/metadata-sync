@@ -155,6 +155,23 @@ def compare_boards(new_board: pd.DataFrame, monday_board: pd.DataFrame, output_d
 
 
 # ---------------------------------------------------------------------------
+# Study type breakdown -- a standing reported metric, not just a comparison
+# ---------------------------------------------------------------------------
+
+def study_type_breakdown(final_dataset: pd.DataFrame, output_dir: Path) -> None:
+    """CTN/HDP/APPLIDONLY counts on the final dataset -- written to CSV since
+    this gets reported out, not just eyeballed once in the console log."""
+    if "study_type" not in final_dataset.columns:
+        logger.warning("study_type column not found -- skipping breakdown")
+        return
+    counts = final_dataset["study_type"].value_counts()
+    logger.info("Study type breakdown:\n%s", counts.to_string())
+    counts.rename_axis("study_type").reset_index(name="count").to_csv(
+        output_dir / "study_type_breakdown.csv", index=False
+    )
+
+
+# ---------------------------------------------------------------------------
 # Final export -- local only, never S3
 # ---------------------------------------------------------------------------
 
@@ -201,7 +218,10 @@ def main(new_board: str, monday_export: str, output_dir: str, debug: bool):
     logger.info("---- STEP 3: Comparing against the live Monday board (reporting only)")
     compare_boards(backfilled, monday_df, out_dir)
 
-    logger.info("---- STEP 4: Exporting final ready-to-upload file")
+    logger.info("---- STEP 4: Study type breakdown")
+    study_type_breakdown(backfilled, out_dir)
+
+    logger.info("---- STEP 5: Exporting final ready-to-upload file")
     export_final(out_dir, backfilled)
 
 
