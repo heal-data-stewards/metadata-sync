@@ -176,7 +176,12 @@ def study_type_breakdown(final_dataset: pd.DataFrame, output_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def export_final(output_dir: Path, final_dataset: pd.DataFrame) -> None:
-    final_dataset = final_dataset.reset_index(drop=True)
+    # The Lambda's own output already has a real "index" column baked in
+    # (same to_excel(index=True) pattern, read back as plain data by
+    # read_new_board's pd.read_excel) -- drop it and regenerate fresh,
+    # rather than writing a second index column on top of it. Without this,
+    # the output ends up with both "index" and "index.1" on the next read.
+    final_dataset = final_dataset.drop(columns=["index"], errors="ignore").reset_index(drop=True)
     final_dataset.index.name = "index"
 
     outfile = output_dir / "MondayStudiesBoard_FINAL.xlsx"
