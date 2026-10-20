@@ -1,7 +1,6 @@
 """
-Assembles the per-study CDE metrics table, then narrows it to each board's
-own columns and names. Keep one wide table as the source of truth; the two
-boards are just different views over it.
+Assembles the per-study CDE metrics table -- the one source-of-truth wide
+table assemble_boards.py hands, in full, to both boards.
 """
 
 import pandas as pd
@@ -27,9 +26,10 @@ def build_cde_board_metrics(
     # Outer join: a study can have HSS mappings without report rows, or vice versa.
     # Deliberately NOT widened to every HDPID in hss_section_counts (HSS's full
     # studies index, ~1100+ studies) -- this per_study table is also used
-    # standalone for the Data Reuse board (to_data_reuse_columns), which has no
-    # separate filter, so widening it here would silently balloon that board to
-    # every HEAL study rather than just ones with CDE report/mapping activity.
+    # standalone as the Data Reuse board's output (assemble_boards.
+    # build_data_reuse_board, every column, no filter), so widening it here
+    # would silently balloon that board to every HEAL study rather than just
+    # ones with CDE report/mapping activity.
     # See assemble_boards.build_data_package_board()'s own hss_section_counts
     # handling for the narrower fix that keeps the Data Package board's
     # num_sections accurate without changing this table's row universe.
@@ -42,6 +42,11 @@ def build_cde_board_metrics(
     return merged, excluded
 
 
+# Early, narrower guesses at which columns + display names each board would
+# want. Neither is wired into assemble_boards.py today -- both boards get
+# every per_study column instead, since which of these actually belong on
+# which real Monday board, and under what label, isn't decided yet. Kept
+# here, unused, in case either is useful once those decisions actually get made.
 DATA_PACKAGE_COLUMNS = {
     "HDPID": "HDPID",
     "high_confidence_share_of_accepted": "high_confidence_share_of_accepted",
@@ -65,10 +70,12 @@ DATA_REUSE_COLUMNS = {
 
 
 def to_data_package_columns(per_study: pd.DataFrame) -> pd.DataFrame:
+    """Unused by assemble_boards.py today -- see DATA_PACKAGE_COLUMNS above."""
     return fill_blanks(_select_and_rename(per_study, DATA_PACKAGE_COLUMNS))
 
 
 def to_data_reuse_columns(per_study: pd.DataFrame) -> pd.DataFrame:
+    """Unused by assemble_boards.py today -- see DATA_REUSE_COLUMNS above."""
     return fill_blanks(_select_and_rename(per_study, DATA_REUSE_COLUMNS))
 
 
