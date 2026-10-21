@@ -101,6 +101,9 @@ DB_ENVIRONMENT = os.getenv("DB_ENVIRONMENT", "test").lower().strip()
 # nobody's explicitly decided otherwise yet).
 TABLE_PRODUCTION_DB = {
     "research_networks": "healstudies",
+    "reporter": "healstudies",
+    "heal_awards_reporter_sn": "healstudies",
+    "study_summary": "healstudies"
 }
 
 
@@ -120,8 +123,11 @@ def _resolve_db_name(table_key: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _run_reporter():
-    engine = create_alchemy_engine()
-    return update_reporter(engine)
+    # awards is an external input, not built by this lambda -- stays on
+    # whatever DB_NAME already points to, regardless of DB_ENVIRONMENT.
+    write_engine = create_alchemy_engine(database=_resolve_db_name("reporter"))
+    read_engine = create_alchemy_engine()
+    return update_reporter(write_engine, read_engine=read_engine)
 
 
 def _run_study_summary():
@@ -132,8 +138,12 @@ def _run_study_summary():
 
 
 def _run_heal_awards_reporter_sn():
-    engine = create_alchemy_engine()
-    return update_heal_awards_reporter_sn(engine)
+    # reporter is built by this same lambda, so read it from wherever
+    # _resolve_db_name("reporter") says it actually lives (moves together
+    # with it in test mode), not necessarily this table's own database.
+    write_engine = create_alchemy_engine(database=_resolve_db_name("heal_awards_reporter_sn"))
+    read_engine = create_alchemy_engine(database=_resolve_db_name("reporter"))
+    return update_heal_awards_reporter_sn(write_engine, read_engine=read_engine)
 
 
 def _run_research_networks():

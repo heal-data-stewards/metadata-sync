@@ -26,18 +26,26 @@ from reporter_lib.heal_award_segmenter_lib import (
 logger = logging.getLogger(__name__)
 
 
-def update_heal_awards_reporter_sn(engine, target_table: str | None = None) -> dict:
+def update_heal_awards_reporter_sn(engine, read_engine=None, target_table: str | None = None) -> dict:
     """
     Refresh the heal_awards_reporter_sn MySQL table.
 
     Args:
-        engine:       SQLAlchemy engine (from db.create_alchemy_engine()).
+        engine:       SQLAlchemy engine to write the target table (from
+                      db.create_alchemy_engine()).
+        read_engine:  Engine for reading the `reporter` table -- this is a
+                      table *this same lambda* builds, so it should resolve
+                      to wherever update_reporter() actually wrote it (same
+                      database in test mode, possibly different from this
+                      table's own write database if ever configured that
+                      way in TABLE_PRODUCTION_DB). Defaults to `engine`.
         target_table: Table name to write; defaults to HEAL_AWARDS_REPORTER_SN_TABLE_NAME
                       env var or 'heal_awards_reporter_sn_test'.
 
     Returns:
         dict with keys: table, rows_written, serial_nums_queried
     """
+    read_engine = read_engine or engine
     if target_table is None:
         target_table = os.getenv(
             "HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"
@@ -46,7 +54,7 @@ def update_heal_awards_reporter_sn(engine, target_table: str | None = None) -> d
     # Pull proj_ser_num from the same reporter table that update_reporter() just wrote
     reporter_source = os.getenv("REPORTER_TABLE_NAME", "reporter_test")
     try:
-        reporter_db = pd.read_sql_table(reporter_source, con=engine)
+        reporter_db = pd.read_sql_table(reporter_source, con=read_engine)
     except (SQLAlchemyError, NoSuchTableError, ValueError) as e:
         logger.error("Could not read reporter table: %s", e)
         return {"table": target_table, "rows_written": 0, "serial_nums_queried": 0}
