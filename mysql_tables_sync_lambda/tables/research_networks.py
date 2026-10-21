@@ -130,14 +130,20 @@ def build_research_networks(awards_df: pd.DataFrame, ref_source) -> pd.DataFrame
     result["res_net_override_flag"] = result["appl_id"].isin(override["appl_id"]).astype(int)
     result = result.drop(columns=["res_net_override"]).drop_duplicates()
 
-    # Drop rows that are effectively empty: no res_net from either the
-    # reference table or an override, and no override on record at all for
-    # this appl_id either. An appl_id with an override on file but a blank
-    # res_net value in it is kept -- that's a real (if incomplete) override,
-    # not nothing.
-    empty = result["res_net"].isna() & (result["res_net_override_flag"] == 0)
+    # Drop a row only when appl_id itself is missing -- a real appl_id with
+    # no res_net match and no override on file is still a real award
+    # record and belongs in the table; only a genuinely missing appl_id
+    # carries no information at all.
+    #
+    # Can't just check appl_id.isna(): _read_table() casts appl_id to str
+    # unconditionally (needed so merges match correctly against other
+    # string-typed appl_id columns), which turns a genuine SQL NULL into
+    # the literal string "None" before it ever gets here -- isna() would
+    # never see it. Check for that explicitly instead.
+    appl_id_missing = result["appl_id"].isna() | result["appl_id"].astype(str).str.strip().isin(["", "None", "nan"])
+    empty = result["res_net"].isna() & (result["res_net_override_flag"] == 0) & appl_id_missing
     if empty.any():
-        logger.info("research_networks: dropping %d row(s) with no res_net and no override", empty.sum())
+        logger.info("research_networks: dropping %d row(s) with no appl_id", empty.sum())
     result = result[~empty]
 
     logger.info("research_networks: %d rows (%d overridden)", len(result), result["res_net_override_flag"].sum())
