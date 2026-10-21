@@ -30,25 +30,12 @@ Lambda packaging notes
 ----------------------
 Include these files alongside lambda_function.py when deploying:
   - db.py
-  - sources.py
   - notify.py
   - tables/__init__.py
   - tables/reporter.py
   - tables/study_summary.py
-  - tables/research_networks.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
-
-tempspace/healstudies database split
---------------------------------------
-Each table's *output* database is independent of its table-name env var:
-<TABLE>_DB_NAME picks the database (default "tempspace", the safe
-test-isolation choice), separately from <TABLE>_TABLE_NAME picking the
-table name (default "<table>_test"). A table's *inputs* (e.g.
-research_networks reading `awards`) still come from wherever DB_NAME
-already points -- only each table's own written-to database moves.
-Production deployments set both env vars explicitly per table; see
-tables/research_networks.py for the pattern.
 
 Slack notifications
 --------------------
@@ -64,22 +51,14 @@ from dotenv import load_dotenv
 
 from db import connect_mysql, create_alchemy_engine
 from notify import notify_slack
-from sources import LocalExcelSource, S3ExcelSource
 from tables.reporter import update_reporter
 from tables.study_summary import update_study_summary
 from tables.heal_awards_reporter_sn import update_heal_awards_reporter_sn
-from tables.research_networks import update_research_networks
 
 load_dotenv()
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
 logger = logging.getLogger(__name__)
-
-# Manual inputs (hand-maintained reference files a person uploads, rather
-# than anything synced automatically) live here. Same bucket convention as
-# package_board_lambda/monday_package_board_lambda's inputs.
-S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
-MANUAL_INPUTS_PREFIX = os.getenv("MANUAL_INPUTS_PREFIX", "mysql_tables_sync/inputs")
 
 # ---------------------------------------------------------------------------
 # Table registry
@@ -87,7 +66,6 @@ MANUAL_INPUTS_PREFIX = os.getenv("MANUAL_INPUTS_PREFIX", "mysql_tables_sync/inpu
 # Each entry: table_key -> callable that performs the update and returns a dict.
 # Order matters for "all" — tables listed earlier run first.
 # reporter must precede study_summary (study_summary reads from reporter).
-# research_networks must also precede study_summary (same reason).
 # ---------------------------------------------------------------------------
 
 def _run_reporter():
@@ -107,28 +85,9 @@ def _run_heal_awards_reporter_sn():
     return update_heal_awards_reporter_sn(engine)
 
 
-def _run_research_networks():
-    # awards lives wherever DB_NAME already points (unchanged, existing
-    # behavior) -- only the *output* table's database is the new
-    # tempspace/healstudies choice, via RESEARCH_NETWORKS_DB_NAME.
-    read_conn = connect_mysql()
-    write_db = os.getenv("RESEARCH_NETWORKS_DB_NAME", "tempspace")
-    write_conn = read_conn if write_db == os.getenv("DB_NAME") else connect_mysql(database=write_db)
-    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
-    try:
-        result = update_research_networks(read_conn, write_conn, ref_source)
-    finally:
-        read_conn.close()
-        if write_conn is not read_conn:
-            write_conn.close()
-    result["database"] = write_db
-    return result
-
-
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
-    "research_networks":     _run_research_networks,          # must run before study_summary
     "study_summary":          _run_study_summary,
     # Future tables — add entries here, e.g.:
     # "engagement_flags": _run_engagement_flags,
@@ -142,7 +101,6 @@ TABLE_REGISTRY = {
 _TABLE_NAME_ENV = {
     "reporter":               ("REPORTER_TABLE_NAME", "reporter_test"),
     "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"),
-    "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks_test"),
     "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary_test"),
 }
 

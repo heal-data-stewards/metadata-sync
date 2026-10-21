@@ -1,7 +1,6 @@
 boto3
 mysql-connector-python
 numpy
-openpyxl
 pandas
 pymysql
 python-dotenv
