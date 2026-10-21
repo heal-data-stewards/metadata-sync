@@ -50,6 +50,12 @@ def _read_table(conn, table: str) -> pd.DataFrame:
     return df
 
 
+def _clean_cell(val):
+    if pd.isna(val):
+        return val
+    return " ".join(str(val).replace("\n", " ").replace("\r", " ").split())
+
+
 def _clean_text(df: pd.DataFrame) -> pd.DataFrame:
     """Collapse line breaks/extra whitespace in every cell; drop fully-blank rows.
 
@@ -61,12 +67,7 @@ def _clean_text(df: pd.DataFrame) -> pd.DataFrame:
     it needs by name (ref_table[["res_prg", "res_net"]], etc.), so dropping
     a stray blank column was never actually necessary, only risky.
     """
-    def clean_cell(val):
-        if pd.isna(val):
-            return val
-        return " ".join(str(val).replace("\n", " ").replace("\r", " ").split())
-
-    df = df.apply(lambda s: s.map(clean_cell))
+    df = df.apply(lambda s: s.map(_clean_cell))
     return df.dropna(axis=0, how="all")
 
 
@@ -111,6 +112,14 @@ def build_research_networks(awards_df: pd.DataFrame, ref_source) -> pd.DataFrame
     override["appl_id"] = override["appl_id"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
 
     result = awards_df[["appl_id", "res_prg"]].copy()
+    # ref_table's res_prg went through _clean_text (whitespace/newline
+    # collapsed); awards.res_prg comes straight from MySQL with no such
+    # cleaning. Without matching normalization here, any formatting
+    # difference (trailing space, embedded newline, double space) silently
+    # fails the join below and gets miscounted as "not in reference table"
+    # -- which the empty-row filter would then drop as if it were a
+    # genuine non-match, hiding the real cause.
+    result["res_prg"] = result["res_prg"].map(_clean_cell)
     result = result.merge(ref_table[["res_prg", "res_net"]], on="res_prg", how="left")
     result = result.drop(columns=["res_prg"])
 
