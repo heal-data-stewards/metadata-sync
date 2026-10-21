@@ -189,13 +189,14 @@ def _run_research_networks():
 
 
 def _run_mysql_merge():
-    # awards/progress_tracker: external, always DB_NAME. reporter/
-    # research_networks: built by this lambda, follow DB_ENVIRONMENT.
-    # nihtables/mysql_merged (the write target): ALWAYS tempspace in every
-    # environment including production -- pure pipeline-internal staging
-    # data, never added to TABLE_PRODUCTION_DB (see tables/mysql_merge.py).
+    # awards: external, always DB_NAME. reporter/research_networks: built
+    # by this lambda, follow DB_ENVIRONMENT. progress_tracker: built by a
+    # separate lambda that writes to healstudies only -- no tempspace copy
+    # ever, so it's ALWAYS healstudies regardless of DB_ENVIRONMENT, same
+    # as nihtables/mysql_merged (the write target) are ALWAYS tempspace.
+    # Neither is in TABLE_PRODUCTION_DB (see tables/mysql_merge.py).
     #
-    # Up to 4 distinct databases could be in play at once here, so connections
+    # Up to 5 distinct databases could be in play at once here, so connections
     # are opened once per distinct database and reused, rather than the
     # nested-reuse-or-not ternary _run_study_summary() uses for its 3.
     db_name = os.getenv("DB_NAME")
@@ -209,6 +210,7 @@ def _run_mysql_merge():
     conn = _conn_for(db_name)
     reporter_conn = _conn_for(_resolve_db_name("reporter"))
     resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    progress_tracker_conn = _conn_for(HEALSTUDIES_DB_NAME)
     write_conn = _conn_for(TEMPSPACE_DB_NAME)
 
     ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
@@ -216,6 +218,7 @@ def _run_mysql_merge():
         result = update_mysql_merge(
             conn, ref_source,
             write_conn=write_conn, reporter_conn=reporter_conn, research_networks_conn=resnet_conn,
+            progress_tracker_conn=progress_tracker_conn,
         )
     finally:
         for c in open_conns.values():

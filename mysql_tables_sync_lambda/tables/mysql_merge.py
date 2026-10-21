@@ -18,6 +18,12 @@ differences:
     reads (confirmed: no SQL/_read_table reference to either name anywhere
     else in the codebase), so they always resolve to tempspace regardless
     of DB_ENVIRONMENT, in every environment including production.
+  - progress_tracker is the mirror case: it's built and written by a
+    separate lambda directly to healstudies, with no tempspace copy ever,
+    so reading it always targets healstudies regardless of DB_ENVIRONMENT
+    too -- it never goes through TABLE_PRODUCTION_DB/_resolve_db_name at
+    all, since those only choose between tempspace and healstudies for
+    tables *this* lambda owns.
 
 Produced together in one build() call rather than as two independent
 registry entries, since mysql_merged needs nihtables as an intermediate
@@ -249,12 +255,13 @@ def update_mysql_merge(
     write_conn=None,
     reporter_conn=None,
     research_networks_conn=None,
+    progress_tracker_conn=None,
     nihtables_table: str | None = None,
     mysql_merged_table: str | None = None,
 ) -> dict:
     """
-    conn: connection for reading awards/progress_tracker -- genuinely
-          external inputs this lambda doesn't build, always on DB_NAME.
+    conn: connection for reading awards -- a genuinely external input this
+          lambda doesn't build, always on DB_NAME.
     write_conn: connection for writing nihtables/mysql_merged themselves.
           Defaults to `conn` -- but these two always resolve to tempspace
           (see module docstring), so callers should normally pass a
@@ -264,6 +271,11 @@ def update_mysql_merge(
           two tables, which this same lambda builds and which can live in
           a different database than `conn` under DB_ENVIRONMENT. Default
           to `conn` if not given, same pattern as study_summary.py.
+    progress_tracker_conn: connection for reading progress_tracker, which a
+          separate lambda builds and writes to healstudies only -- there is
+          no tempspace copy, in test or production, so this never follows
+          DB_ENVIRONMENT. Defaults to `conn` if not given, but callers
+          should normally pass a healstudies-specific connection.
     ref_source: a sources.FileSource pointed at the directory/prefix
           holding correct_foanoa_values.csv.
     """
@@ -271,6 +283,7 @@ def update_mysql_merge(
     write_conn = write_conn or conn
     reporter_conn = reporter_conn or conn
     research_networks_conn = research_networks_conn or conn
+    progress_tracker_conn = progress_tracker_conn or conn
 
     if nihtables_table is None:
         nihtables_table = os.getenv("NIHTABLES_TABLE_NAME", NIHTABLES_TABLE)
@@ -279,7 +292,7 @@ def update_mysql_merge(
 
     reporter_df = _read_table(reporter_conn, "reporter")
     awards_df = _read_table(conn, "awards")
-    progress_tracker_df = _read_table(conn, "progress_tracker")
+    progress_tracker_df = _read_table(progress_tracker_conn, "progress_tracker")
     research_networks_df = _read_table(research_networks_conn, "research_networks")
     correct_foanoa_df = ref_source.read_csv(
         "correct_foanoa_values.csv", dtype=str, usecols=["appl_id", "nih_foa_heal_lang", "nih_noa_heal_lang"]
