@@ -51,21 +51,23 @@ def _read_table(conn, table: str) -> pd.DataFrame:
 
 
 def _clean_text(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse line breaks/extra whitespace in every cell; drop empty rows/cols."""
+    """Collapse line breaks/extra whitespace in every cell; drop fully-blank rows.
+
+    Deliberately does NOT drop all-NaN columns (HEAL_01's original
+    dropna(axis=1, how="all") did): a column can legitimately be entirely
+    NaN right now -- e.g. the overrides sheet's res_net when its one
+    current override row has a blank value, or when there are zero
+    override rows at all -- and downstream code always selects the columns
+    it needs by name (ref_table[["res_prg", "res_net"]], etc.), so dropping
+    a stray blank column was never actually necessary, only risky.
+    """
     def clean_cell(val):
         if pd.isna(val):
             return val
         return " ".join(str(val).replace("\n", " ").replace("\r", " ").split())
 
     df = df.apply(lambda s: s.map(clean_cell))
-    if len(df) == 0:
-        # dropna(axis=1, how="all") is vacuously true over zero rows, which
-        # would strip every column -- including appl_id/res_net that
-        # downstream code requires -- if a sheet (e.g. the overrides sheet,
-        # when there happen to be no active overrides) has headers but no
-        # data rows. Nothing meaningful to drop either way with zero rows.
-        return df
-    return df.dropna(axis=1, how="all").dropna(axis=0, how="all")
+    return df.dropna(axis=0, how="all")
 
 
 def _write_research_networks(conn, df: pd.DataFrame, table: str) -> None:
@@ -118,6 +120,16 @@ def build_research_networks(awards_df: pd.DataFrame, ref_source) -> pd.DataFrame
     result["res_net"] = result["res_net_override"].combine_first(result["res_net"])
     result["res_net_override_flag"] = result["appl_id"].isin(override["appl_id"]).astype(int)
     result = result.drop(columns=["res_net_override"]).drop_duplicates()
+
+    # Drop rows that are effectively empty: no res_net from either the
+    # reference table or an override, and no override on record at all for
+    # this appl_id either. An appl_id with an override on file but a blank
+    # res_net value in it is kept -- that's a real (if incomplete) override,
+    # not nothing.
+    empty = result["res_net"].isna() & (result["res_net_override_flag"] == 0)
+    if empty.any():
+        logger.info("research_networks: dropping %d row(s) with no res_net and no override", empty.sum())
+    result = result[~empty]
 
     logger.info("research_networks: %d rows (%d overridden)", len(result), result["res_net_override_flag"].sum())
     return result
