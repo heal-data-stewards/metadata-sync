@@ -41,14 +41,18 @@ Include these files alongside lambda_function.py when deploying:
 
 tempspace/healstudies database split
 --------------------------------------
-Each table's *output* database is independent of its table-name env var:
-<TABLE>_DB_NAME picks the database (default "tempspace", the safe
-test-isolation choice), separately from <TABLE>_TABLE_NAME picking the
-table name (default "<table>_test"). A table's *inputs* (e.g.
-research_networks reading `awards`) still come from wherever DB_NAME
-already points -- only each table's own written-to database moves.
-Production deployments set both env vars explicitly per table; see
-tables/research_networks.py for the pattern.
+Each table's *output* database is independent of its table-name env var
+(<TABLE>_TABLE_NAME, default "<table>_test" -- unchanged). Which database
+is a single shared choice, not a per-table env var: TEMPSPACE_DB_NAME and
+HEALSTUDIES_DB_NAME name the two real databases (defaults "tempspace" and
+"healstudies"), and DB_ENVIRONMENT ("test"/"production", default "test" --
+the safe choice) decides, once per deployed function, whether every table
+writes to tempspace regardless (test) or each table writes to whatever
+TABLE_PRODUCTION_DB below says (production). Adding a table's production
+home is one line in that dict, not a new env var. A table's *inputs*
+(e.g. research_networks reading `awards`) still come from wherever DB_NAME
+already points, unaffected by any of this -- only each table's own
+written-to database moves.
 
 Slack notifications
 --------------------
@@ -82,6 +86,31 @@ S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
 MANUAL_INPUTS_PREFIX = os.getenv("MANUAL_INPUTS_PREFIX", "mysql_tables_sync/inputs")
 
 # ---------------------------------------------------------------------------
+# tempspace/healstudies database routing -- one shared mechanism, not a
+# per-table env var. See the module docstring's "tempspace/healstudies
+# database split" section above.
+# ---------------------------------------------------------------------------
+
+TEMPSPACE_DB_NAME = os.getenv("TEMPSPACE_DB_NAME", "tempspace")
+HEALSTUDIES_DB_NAME = os.getenv("HEALSTUDIES_DB_NAME", "healstudies")
+DB_ENVIRONMENT = os.getenv("DB_ENVIRONMENT", "test").lower().strip()
+
+# Each table's home database when DB_ENVIRONMENT=production. Add a line
+# here, not a new env var, as each table's real home gets decided -- tables
+# not listed default to tempspace even in production (the safe choice when
+# nobody's explicitly decided otherwise yet).
+TABLE_PRODUCTION_DB = {
+    "research_networks": "healstudies",
+}
+
+
+def _resolve_db_name(table_key: str) -> str:
+    """Which database table_key writes to, given DB_ENVIRONMENT."""
+    if DB_ENVIRONMENT != "production":
+        return TEMPSPACE_DB_NAME
+    return HEALSTUDIES_DB_NAME if TABLE_PRODUCTION_DB.get(table_key) == "healstudies" else TEMPSPACE_DB_NAME
+
+# ---------------------------------------------------------------------------
 # Table registry
 #
 # Each entry: table_key -> callable that performs the update and returns a dict.
@@ -109,10 +138,10 @@ def _run_heal_awards_reporter_sn():
 
 def _run_research_networks():
     # awards lives wherever DB_NAME already points (unchanged, existing
-    # behavior) -- only the *output* table's database is the new
-    # tempspace/healstudies choice, via RESEARCH_NETWORKS_DB_NAME.
+    # behavior) -- only the *output* table's database is the
+    # tempspace/healstudies choice, via _resolve_db_name().
     read_conn = connect_mysql()
-    write_db = os.getenv("RESEARCH_NETWORKS_DB_NAME", "tempspace")
+    write_db = _resolve_db_name("research_networks")
     write_conn = read_conn if write_db == os.getenv("DB_NAME") else connect_mysql(database=write_db)
     ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
     try:
