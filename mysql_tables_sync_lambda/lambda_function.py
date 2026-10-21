@@ -131,9 +131,31 @@ def _run_reporter():
 
 
 def _run_study_summary():
+    # study_summary's own write + the 7 source tables not built by this
+    # lambda (study_lookup_table, awards, reporter_dqaudit,
+    # progress_tracker, pi_emails, engagement_flags, po_emails) all use
+    # DB_NAME, unchanged. reporter/research_networks are built by this
+    # lambda and may live elsewhere under DB_ENVIRONMENT -- separate
+    # connections, reused instead of opened twice when they resolve to the
+    # same database as DB_NAME (same pattern as _run_research_networks).
     conn = connect_mysql()
-    result = update_study_summary(conn)
-    conn.close()
+    db_name = os.getenv("DB_NAME")
+
+    reporter_db = _resolve_db_name("reporter")
+    reporter_conn = conn if reporter_db == db_name else connect_mysql(database=reporter_db)
+
+    resnet_db = _resolve_db_name("research_networks")
+    resnet_conn = conn if resnet_db == db_name else (
+        reporter_conn if resnet_db == reporter_db else connect_mysql(database=resnet_db)
+    )
+
+    try:
+        result = update_study_summary(
+            conn, reporter_conn=reporter_conn, research_networks_conn=resnet_conn
+        )
+    finally:
+        for c in {conn, reporter_conn, resnet_conn}:
+            c.close()
     return result
 
 
