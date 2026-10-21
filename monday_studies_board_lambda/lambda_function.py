@@ -42,7 +42,7 @@ import boto3
 import pandas as pd
 from dotenv import load_dotenv
 
-from column_mapping import DROP_COLUMNS, KEY_COLUMN, MYSQL_TO_DISPLAY, PASSTHROUGH_RENAME
+from column_mapping import DATE_COLUMNS, DROP_COLUMNS, KEY_COLUMN, MYSQL_TO_DISPLAY, PASSTHROUGH_RENAME
 from db import connect_mysql
 from notify import notify_slack
 
@@ -55,9 +55,8 @@ S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
 OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "monday_studies_board/outputs")
 STUDY_SUMMARY_TABLE = os.getenv("STUDY_SUMMARY_TABLE", "study_summary")
 
-# Monday's import row limit, per batch file. Matches the already-in-use
-# monday_studies_lambda/monday_board_update.py ("v2") precedent.
-BATCH_SIZE = 1400
+# Monday's import row limit, per batch file.
+BATCH_SIZE = 1000
 
 
 def read_study_summary(conn, table: str = STUDY_SUMMARY_TABLE) -> pd.DataFrame:
@@ -77,10 +76,16 @@ def prepare_for_export(df: pd.DataFrame) -> pd.DataFrame:
     """
     Final column renames + the Monday-upload blank failsafe. No re-derivation
     of study_type/Location/dates/flags -- study_summary already did that.
+
+    Date-type Monday columns (DATE_COLUMNS) are exempt from the dash fill: a
+    literal "-" isn't a parseable date, so Monday's import wouldn't write it
+    to the cell anyway -- it'd just silently drop it, which both defeats the
+    failsafe's point and makes the source file look like it has real dashes
+    where it doesn't. Left genuinely blank instead.
     """
     d = df.rename(columns=PASSTHROUGH_RENAME).drop(columns=DROP_COLUMNS, errors="ignore")
 
-    value_columns = [c for c in d.columns if c != KEY_COLUMN]
+    value_columns = [c for c in d.columns if c != KEY_COLUMN and c not in DATE_COLUMNS]
     d[value_columns] = d[value_columns].fillna("-")
     d[value_columns] = d[value_columns].replace("", "-")
 

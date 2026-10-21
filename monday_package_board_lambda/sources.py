@@ -66,9 +66,9 @@ class S3ExcelSource:
             raise FileNotFoundError(f"No object matching {pattern!r} under s3://{self.bucket}/{self.prefix}")
         return max(candidates)[1]
 
-    def write_excel(self, name: str, df: pd.DataFrame) -> None:
+    def write_excel(self, name: str, df: pd.DataFrame, index: bool = False) -> None:
         buf = io.BytesIO()
-        df.to_excel(buf, index=False, engine="xlsxwriter")
+        df.to_excel(buf, index=index, engine="xlsxwriter")
         self.client.put_object(Bucket=self.bucket, Key=self._key(name), Body=buf.getvalue())
 
 
@@ -99,5 +99,5 @@ class LocalExcelSource:
             raise FileNotFoundError(f"No file matching {pattern!r} in {self.directory}")
         return max(candidates)[1]
 
-    def write_excel(self, name: str, df: pd.DataFrame) -> None:
-        df.to_excel(self._path(name), index=False, engine="xlsxwriter")
+    def write_excel(self, name: str, df: pd.DataFrame, index: bool = False) -> None:
+        df.to_excel(self._path(name), index=index, engine="xlsxwriter")

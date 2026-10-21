@@ -92,13 +92,19 @@ def run(input_source, output_source) -> dict:
     )
     links = build_data_package_links(mds_links, platform_assessments, hss_study_counts)
 
-    data_package_board = build_data_package_board(links, per_study)
+    data_package_board = build_data_package_board(links, per_study, hss_section_counts)
     data_reuse_board = build_data_reuse_board(per_study)
+
+    # Data Package board wants a real "index" column (0..N-1) on upload;
+    # Data Reuse doesn't currently need one -- scoped to just this one
+    # rather than changing write_excel's default for both boards.
+    data_package_board = data_package_board.reset_index(drop=True)
+    data_package_board.index.name = "index"
 
     today = date.today().strftime("%Y-%m-%d")
     data_package_name = f"DataPackageBoard_{today}.xlsx"
     data_reuse_name = f"DataReuseBoard_{today}.xlsx"
-    output_source.write_excel(data_package_name, data_package_board)
+    output_source.write_excel(data_package_name, data_package_board, index=True)
     output_source.write_excel(data_reuse_name, data_reuse_board)
 
     if len(excluded_report_rows):

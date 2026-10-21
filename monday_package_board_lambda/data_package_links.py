@@ -34,8 +34,9 @@ def build_data_package_links(
     from hss_sections.fetch_study_index_counts().
 
     Returns one row per (HDPID, repository link): HDPID, Repository Link,
-    Repository Name, Platform assessment of Data Link, VLMD on Platform for
-    Study?, CDE mappings on HSS for Study? -- blanks filled with "-".
+    Repository Name, Is Other Website Link?, Platform assessment of Data
+    Link, VLMD on Platform for Study?, CDE mappings on HSS for Study? --
+    blanks filled with "-".
     """
     matched = match_links(mds_links, platform_assessments)
 
@@ -60,9 +61,13 @@ def build_data_package_links(
     )
     rows["VLMD on Platform for Study?"] = ["Yes" if n > 0 else "No" for n in rows["num_variables"]]
     rows["CDE mappings on HSS for Study?"] = ["Yes" if n > 0 else "No" for n in rows["num_sections"]]
+    # is_other_website is only ever True/False here -- the True/False/None
+    # tri-state from mds_repo_links.py's "no links at all" sentinel rows was
+    # already excluded by the has_mds_link filter above.
+    rows["Is Other Website Link?"] = ["Yes" if v else "No" for v in rows["is_other_website"]]
 
     out = rows[[
-        "index_hdp_id", "repo_link", "repo_name", "platform_assessment",
+        "index_hdp_id", "repo_link", "repo_name", "Is Other Website Link?", "platform_assessment",
         "VLMD on Platform for Study?", "CDE mappings on HSS for Study?",
     ]].rename(columns={
         "index_hdp_id": "HDPID",

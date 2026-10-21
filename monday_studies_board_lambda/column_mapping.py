@@ -56,10 +56,21 @@ RENAME_DICT = {
 
 # Columns stored under their own snake_case name already (not derived from
 # RENAME_DICT) that still need a Monday-facing rename or are kept as-is.
+#
+# "Project Start"/"Project End" are last here, not in RENAME_DICT above:
+# they're a display-only relabel to match Monday's real column names
+# ("Project Start date"/"Project End date"), applied as a second pass
+# AFTER MYSQL_TO_DISPLAY (which must stay matched to the name actually
+# baked into study_summary's stored MySQL column at write time, in
+# mysql_tables_sync_lambda/tables/study_summary.py -- renaming the value
+# there instead would silently break that match, since MYSQL_TO_DISPLAY's
+# key is derived FROM that value).
 PASSTHROUGH_RENAME = {
     "study_most_recent_appl": "Most Recent Appl_ID",
     "study_hdp_id_appl":      "HDP appl_ID",
     "location":               "Location",
+    "Project Start":          "Project Start date",
+    "Project End":            "Project End date",
 }
 
 # Internal join artifacts -- never shown on the board.
@@ -67,6 +78,13 @@ DROP_COLUMNS = ["study_hdp_id", "hdp_id", "hdp_id_x", "hdp_id_y"]
 
 # The board's unique-row key; never blanked out to "-".
 KEY_COLUMN = "key"
+
+# Monday "Date"-type columns. A literal "-" isn't a parseable date, so
+# Monday's import won't write it to the cell -- it'd just be silently
+# dropped, achieving nothing while also not looking like an intentional
+# empty cell in the source file. Left genuinely blank instead of getting
+# the usual dash failsafe fill.
+DATE_COLUMNS = {"Project Start date", "Project End date", "Platform Reg Time"}
 
 
 def _mysql_colname(name: str) -> str:
