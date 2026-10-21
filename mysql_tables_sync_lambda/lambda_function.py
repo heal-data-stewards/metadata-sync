@@ -36,6 +36,7 @@ Include these files alongside lambda_function.py when deploying:
   - tables/reporter.py
   - tables/study_summary.py
   - tables/research_networks.py
+  - tables/mysql_merge.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
 
@@ -73,6 +74,7 @@ from tables.reporter import update_reporter
 from tables.study_summary import update_study_summary
 from tables.heal_awards_reporter_sn import update_heal_awards_reporter_sn
 from tables.research_networks import update_research_networks
+from tables.mysql_merge import update_mysql_merge
 
 load_dotenv()
 
@@ -186,10 +188,46 @@ def _run_research_networks():
     return result
 
 
+def _run_mysql_merge():
+    # awards/progress_tracker: external, always DB_NAME. reporter/
+    # research_networks: built by this lambda, follow DB_ENVIRONMENT.
+    # nihtables/mysql_merged (the write target): ALWAYS tempspace in every
+    # environment including production -- pure pipeline-internal staging
+    # data, never added to TABLE_PRODUCTION_DB (see tables/mysql_merge.py).
+    #
+    # Up to 4 distinct databases could be in play at once here, so connections
+    # are opened once per distinct database and reused, rather than the
+    # nested-reuse-or-not ternary _run_study_summary() uses for its 3.
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    reporter_conn = _conn_for(_resolve_db_name("reporter"))
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    write_conn = _conn_for(TEMPSPACE_DB_NAME)
+
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+    try:
+        result = update_mysql_merge(
+            conn, ref_source,
+            write_conn=write_conn, reporter_conn=reporter_conn, research_networks_conn=resnet_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
     "research_networks":     _run_research_networks,          # must run before study_summary
+    "mysql_merge":            _run_mysql_merge,                # must run after reporter + research_networks
     "study_summary":          _run_study_summary,
     # Future tables — add entries here, e.g.:
     # "engagement_flags": _run_engagement_flags,
@@ -200,6 +238,12 @@ TABLE_REGISTRY = {
 # Mirrors the resolution each table module does internally — kept here too so
 # Slack notifications can show the real table name even on failure, before
 # the table function itself ever gets a chance to resolve/return it.
+#
+# mysql_merge produces two tables, not one -- it isn't in this dict at all,
+# since its own result dict already carries both real table names directly
+# (nihtables_table/mysql_merged_table), and _resolve_table_name()'s fallback
+# (the bare registry key) is only used for the Slack "starting" log line,
+# not anything that needs to be precise ahead of time.
 _TABLE_NAME_ENV = {
     "reporter":               ("REPORTER_TABLE_NAME", "reporter_test"),
     "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"),

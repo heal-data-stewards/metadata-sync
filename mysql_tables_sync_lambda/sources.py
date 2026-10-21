@@ -2,10 +2,11 @@
 Manual input sources for mysql_tables_sync_lambda.
 
 Some tables need a hand-maintained reference file (e.g. research_networks'
-Google-Drive-sourced lookup workbook) that a person uploads to S3 rather
-than something synced automatically. Reads go through a small source
-interface so a table module doesn't care whether it's running against S3
-(Lambda) or a local directory (tests, local runs).
+Google-Drive-sourced lookup workbook, or HEAL_02's correct_foanoa_values.csv
+correction file) that a person uploads to S3 rather than something synced
+automatically. Reads go through a small source interface so a table module
+doesn't care whether it's running against S3 (Lambda) or a local directory
+(tests, local runs).
 """
 
 import io
@@ -17,10 +18,11 @@ import pandas as pd
 
 class FileSource(Protocol):
     def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame: ...
+    def read_csv(self, name: str, **kwargs) -> pd.DataFrame: ...
 
 
 class S3ExcelSource:
-    """Reads Excel files from s3://<bucket>/<prefix>/<name>."""
+    """Reads Excel/CSV files from s3://<bucket>/<prefix>/<name>."""
 
     def __init__(self, s3_uri: str, s3_client=None):
         parsed = urlparse(s3_uri)
@@ -36,17 +38,29 @@ class S3ExcelSource:
     def _key(self, name: str) -> str:
         return f"{self.prefix}/{name}" if self.prefix else name
 
-    def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame:
+    def _get(self, name: str) -> bytes:
         obj = self.client.get_object(Bucket=self.bucket, Key=self._key(name))
-        return pd.read_excel(io.BytesIO(obj["Body"].read()), sheet_name=sheet_name)
+        return obj["Body"].read()
+
+    def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame:
+        return pd.read_excel(io.BytesIO(self._get(name)), sheet_name=sheet_name)
+
+    def read_csv(self, name: str, **kwargs) -> pd.DataFrame:
+        return pd.read_csv(io.BytesIO(self._get(name)), **kwargs)
 
 
 class LocalExcelSource:
-    """Reads Excel files from a local directory. Used for local runs and tests."""
+    """Reads Excel/CSV files from a local directory. Used for local runs and tests."""
 
     def __init__(self, directory: str):
         self.directory = directory
 
-    def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame:
+    def _path(self, name: str) -> str:
         import os
-        return pd.read_excel(os.path.join(self.directory, name), sheet_name=sheet_name)
+        return os.path.join(self.directory, name)
+
+    def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame:
+        return pd.read_excel(self._path(name), sheet_name=sheet_name)
+
+    def read_csv(self, name: str, **kwargs) -> pd.DataFrame:
+        return pd.read_csv(self._path(name), **kwargs)
