@@ -38,6 +38,7 @@ Include these files alongside lambda_function.py when deploying:
   - tables/research_networks.py
   - tables/mysql_merge.py
   - tables/reporter_dqaudit.py
+  - tables/study_lookup_table.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
 
@@ -80,6 +81,7 @@ from tables.heal_awards_reporter_sn import update_heal_awards_reporter_sn
 from tables.research_networks import update_research_networks
 from tables.mysql_merge import update_mysql_merge
 from tables.reporter_dqaudit import update_reporter_dqaudit
+from tables.study_lookup_table import generate_match_candidates, update_study_lookup_table
 
 load_dotenv()
 
@@ -112,6 +114,7 @@ TABLE_PRODUCTION_DB = {
     "heal_awards_reporter_sn": "healstudies",
     "study_summary": "healstudies",
     "reporter_dqaudit": "healstudies",
+    "study_lookup_table": "healstudies",
 }
 
 
@@ -139,13 +142,13 @@ def _run_reporter():
 
 
 def _run_study_summary():
-    # study_summary's own write + the 6 source tables not built by this
-    # lambda (study_lookup_table, awards, progress_tracker, pi_emails,
-    # engagement_flags, po_emails) all use DB_NAME, unchanged.
-    # reporter/research_networks/reporter_dqaudit are built by this lambda
-    # and may live elsewhere under DB_ENVIRONMENT -- separate connections,
-    # opened once per distinct database and reused (same _conn_for()
-    # pattern as _run_mysql_merge, now that there are 4 instead of 3).
+    # study_summary's own write + the 5 source tables not built by this
+    # lambda (awards, progress_tracker, pi_emails, engagement_flags,
+    # po_emails) all use DB_NAME, unchanged. reporter/research_networks/
+    # reporter_dqaudit/study_lookup_table are built by this lambda and may
+    # live elsewhere under DB_ENVIRONMENT -- separate connections, opened
+    # once per distinct database and reused (same _conn_for() pattern as
+    # _run_mysql_merge, now that there are 5 instead of 4).
     db_name = os.getenv("DB_NAME")
     open_conns = {}
 
@@ -158,6 +161,7 @@ def _run_study_summary():
     reporter_conn = _conn_for(_resolve_db_name("reporter"))
     resnet_conn = _conn_for(_resolve_db_name("research_networks"))
     dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
 
     try:
         result = update_study_summary(
@@ -165,6 +169,7 @@ def _run_study_summary():
             reporter_conn=reporter_conn,
             research_networks_conn=resnet_conn,
             reporter_dqaudit_conn=dqaudit_conn,
+            study_lookup_table_conn=study_lookup_conn,
         )
     finally:
         for c in open_conns.values():
@@ -270,17 +275,77 @@ def _run_reporter_dqaudit():
     return result
 
 
+def _run_study_manual_match_candidates():
+    # Writes no MySQL table -- S3 only (the pending file + ledger +
+    # archive). mysql_merged is ALWAYS tempspace; reporter_dqaudit follows
+    # DB_ENVIRONMENT. Same _conn_for() reuse pattern as _run_reporter_dqaudit.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+
+    try:
+        result = generate_match_candidates(mysql_merged_conn, reporter_dqaudit_conn, ref_source)
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_study_lookup_table():
+    # Finalizes study_lookup_table -- reshuffles every xstudy_id in it, so
+    # this is deliberately a separate, independently-triggered registry
+    # entry rather than something that runs automatically on every "all".
+    # mysql_merged is ALWAYS tempspace; reporter_dqaudit/study_lookup_table
+    # (the write target) follow DB_ENVIRONMENT.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    write_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+
+    try:
+        result = update_study_lookup_table(
+            mysql_merged_conn, reporter_dqaudit_conn, ref_source, write_conn=write_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
     "research_networks":     _run_research_networks,          # must run before study_summary
     "mysql_merge":            _run_mysql_merge,                # must run after reporter + research_networks
     "reporter_dqaudit":       _run_reporter_dqaudit,           # must run after mysql_merge + research_networks + heal_awards_reporter_sn
-    "study_summary":          _run_study_summary,              # must run after reporter_dqaudit
+    "study_manual_match_candidates": _run_study_manual_match_candidates,  # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
+    "study_lookup_table":     _run_study_lookup_table,         # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
+    "study_summary":          _run_study_summary,              # must run after reporter_dqaudit (+ study_lookup_table, once finalized)
     # Future tables — add entries here, e.g.:
     # "engagement_flags": _run_engagement_flags,
     # "awards":           _run_awards,
 }
+
+# study_manual_match_candidates and study_lookup_table are both registered
+# above but deliberately excluded from "all" (see _ALL_TABLES below):
+# finalizing study_lookup_table reshuffles every xstudy_id in it, which
+# should happen when a human decides to run it -- after reviewing whatever
+# the candidates step surfaced -- not silently on every scheduled sync.
+_ALL_TABLES = [k for k in TABLE_REGISTRY if k not in ("study_manual_match_candidates", "study_lookup_table")]
 
 # Registry key -> (env var controlling the real table name, default table name).
 # Mirrors the resolution each table module does internally — kept here too so
@@ -297,6 +362,7 @@ _TABLE_NAME_ENV = {
     "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn"),
     "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks"),
     "reporter_dqaudit":       ("REPORTER_DQAUDIT_TABLE_NAME", "reporter_dqaudit"),
+    "study_lookup_table":     ("STUDY_LOOKUP_TABLE_NAME", "study_lookup_table"),
     "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary"),
 }
 
@@ -317,7 +383,7 @@ def lambda_handler(event, context):
     logger.info("Invoked with table=%s", table)
 
     if table == "all":
-        tables_to_run = list(TABLE_REGISTRY.keys())
+        tables_to_run = _ALL_TABLES
     elif table in TABLE_REGISTRY:
         tables_to_run = [table]
     else:

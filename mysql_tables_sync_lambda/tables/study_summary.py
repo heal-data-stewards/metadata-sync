@@ -178,27 +178,33 @@ def _build_resnet(gt_file: pd.DataFrame, resnet_df: pd.DataFrame) -> pd.DataFram
 # ---------------------------------------------------------------------------
 
 def _build_study_summary(
-    conn, reporter_conn=None, research_networks_conn=None, reporter_dqaudit_conn=None
+    conn,
+    reporter_conn=None,
+    research_networks_conn=None,
+    reporter_dqaudit_conn=None,
+    study_lookup_table_conn=None,
 ) -> pd.DataFrame:
     """
     Read all source tables and return the denormalized study summary DataFrame.
 
-    reporter_conn/research_networks_conn/reporter_dqaudit_conn: separate
-    connections for the three source tables *this lambda itself builds*
-    (reporter, research_networks, reporter_dqaudit), which can live in a
-    different database than everything else here under the
-    tempspace/healstudies split -- default to `conn` so callers that don't
-    care (everything stays in one database) are unaffected. The other 6
-    source tables (study_lookup_table, awards, progress_tracker, pi_emails,
-    engagement_flags, po_emails) are either genuinely external or not yet
-    ported, so they always read via `conn`.
+    reporter_conn/research_networks_conn/reporter_dqaudit_conn/
+    study_lookup_table_conn: separate connections for the four source
+    tables *this lambda itself builds* (reporter, research_networks,
+    reporter_dqaudit, study_lookup_table), which can live in a different
+    database than everything else here under the tempspace/healstudies
+    split -- default to `conn` so callers that don't care (everything
+    stays in one database) are unaffected. The other 5 source tables
+    (awards, progress_tracker, pi_emails, engagement_flags, po_emails) are
+    either genuinely external or not yet ported, so they always read via
+    `conn`.
     """
     reporter_conn = reporter_conn or conn
     research_networks_conn = research_networks_conn or conn
     reporter_dqaudit_conn = reporter_dqaudit_conn or conn
+    study_lookup_table_conn = study_lookup_table_conn or conn
 
     logger.info("Reading source tables from MySQL")
-    gt_file = _read_table(conn, "study_lookup_table")
+    gt_file = _read_table(study_lookup_table_conn, "study_lookup_table")
     gt_file.replace("0", np.nan, inplace=True)
     logger.info("  study_lookup_table: %d rows", len(gt_file))
 
@@ -416,18 +422,20 @@ def update_study_summary(
     reporter_conn=None,
     research_networks_conn=None,
     reporter_dqaudit_conn=None,
+    study_lookup_table_conn=None,
 ) -> dict:
     """
     Rebuild the study_summary table from all source MySQL tables.
 
     Args:
         conn:         mysql.connector connection (from db.connect_mysql()),
-                      used for study_summary's own write and for the 6
+                      used for study_summary's own write and for the 5
                       source tables that aren't built by this lambda.
         target_table: Table name to write; defaults to STUDY_SUMMARY_TABLE_NAME
                       env var or 'study_summary'.
-        reporter_conn / research_networks_conn / reporter_dqaudit_conn: see
-                      _build_study_summary(). Default to `conn` if not given.
+        reporter_conn / research_networks_conn / reporter_dqaudit_conn /
+        study_lookup_table_conn: see _build_study_summary(). Default to
+                      `conn` if not given.
 
     Returns:
         dict with keys: table, rows_written
@@ -440,6 +448,7 @@ def update_study_summary(
         reporter_conn=reporter_conn,
         research_networks_conn=research_networks_conn,
         reporter_dqaudit_conn=reporter_dqaudit_conn,
+        study_lookup_table_conn=study_lookup_table_conn,
     )
     df = _prepare_for_mysql(df)
     _write_study_summary(conn, df, target_table)
