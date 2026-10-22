@@ -164,7 +164,7 @@ def update_research_networks(
         or a different one if the two tables live in different databases).
     ref_source: see build_research_networks().
     """
-    target_table = target_table or os.getenv("RESEARCH_NETWORKS_TABLE_NAME", "research_networks_test")
+    target_table = target_table or os.getenv("RESEARCH_NETWORKS_TABLE_NAME", "research_networks")
 
     awards_df = _read_table(read_conn, "awards")
     result = build_research_networks(awards_df, ref_source)

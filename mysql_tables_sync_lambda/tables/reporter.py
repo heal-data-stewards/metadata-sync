@@ -80,7 +80,7 @@ def update_reporter(engine, read_engine=None, target_table: str | None = None) -
     """
     read_engine = read_engine or engine
     if target_table is None:
-        target_table = os.getenv("REPORTER_TABLE_NAME", "reporter_test")
+        target_table = os.getenv("REPORTER_TABLE_NAME", "reporter")
     dd_path = os.getenv("REPORTER_DD_PATH", _DEFAULT_DD)
     run_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 

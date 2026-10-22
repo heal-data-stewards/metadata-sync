@@ -426,7 +426,7 @@ def update_study_summary(
     """
     import os
     if target_table is None:
-        target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary_test")
+        target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary")
     df = _build_study_summary(conn, reporter_conn=reporter_conn, research_networks_conn=research_networks_conn)
     df = _prepare_for_mysql(df)
     _write_study_summary(conn, df, target_table)

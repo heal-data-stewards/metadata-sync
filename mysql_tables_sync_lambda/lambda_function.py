@@ -43,7 +43,10 @@ Include these files alongside lambda_function.py when deploying:
 tempspace/healstudies database split
 --------------------------------------
 Each table's *output* database is independent of its table-name env var
-(<TABLE>_TABLE_NAME, default "<table>_test" -- unchanged). Which database
+(<TABLE>_TABLE_NAME, default "<table>" -- the real/production name in every
+environment, since tempspace vs. healstudies is what actually distinguishes
+test from production now; a "_test" suffix on top of that was redundant and
+confusing). Which database
 is a single shared choice, not a per-table env var: TEMPSPACE_DB_NAME and
 HEALSTUDIES_DB_NAME name the two real databases (defaults "tempspace" and
 "healstudies"), and DB_ENVIRONMENT ("test"/"production", default "test" --
@@ -248,10 +251,10 @@ TABLE_REGISTRY = {
 # (the bare registry key) is only used for the Slack "starting" log line,
 # not anything that needs to be precise ahead of time.
 _TABLE_NAME_ENV = {
-    "reporter":               ("REPORTER_TABLE_NAME", "reporter_test"),
-    "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"),
-    "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks_test"),
-    "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary_test"),
+    "reporter":               ("REPORTER_TABLE_NAME", "reporter"),
+    "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn"),
+    "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks"),
+    "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary"),
 }
 
 

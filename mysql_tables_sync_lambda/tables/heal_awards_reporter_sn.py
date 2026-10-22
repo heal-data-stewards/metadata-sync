@@ -48,11 +48,11 @@ def update_heal_awards_reporter_sn(engine, read_engine=None, target_table: str |
     read_engine = read_engine or engine
     if target_table is None:
         target_table = os.getenv(
-            "HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"
+            "HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn"
         )
 
     # Pull proj_ser_num from the same reporter table that update_reporter() just wrote
-    reporter_source = os.getenv("REPORTER_TABLE_NAME", "reporter_test")
+    reporter_source = os.getenv("REPORTER_TABLE_NAME", "reporter")
     try:
         reporter_db = pd.read_sql_table(reporter_source, con=read_engine)
     except (SQLAlchemyError, NoSuchTableError, ValueError) as e:
