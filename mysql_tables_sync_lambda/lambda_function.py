@@ -37,6 +37,7 @@ Include these files alongside lambda_function.py when deploying:
   - tables/study_summary.py
   - tables/research_networks.py
   - tables/mysql_merge.py
+  - tables/reporter_dqaudit.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
 
@@ -78,6 +79,7 @@ from tables.study_summary import update_study_summary
 from tables.heal_awards_reporter_sn import update_heal_awards_reporter_sn
 from tables.research_networks import update_research_networks
 from tables.mysql_merge import update_mysql_merge
+from tables.reporter_dqaudit import update_reporter_dqaudit
 
 load_dotenv()
 
@@ -108,7 +110,8 @@ TABLE_PRODUCTION_DB = {
     "research_networks": "healstudies",
     "reporter": "healstudies",
     "heal_awards_reporter_sn": "healstudies",
-    "study_summary": "healstudies"
+    "study_summary": "healstudies",
+    "reporter_dqaudit": "healstudies",
 }
 
 
@@ -136,30 +139,35 @@ def _run_reporter():
 
 
 def _run_study_summary():
-    # study_summary's own write + the 7 source tables not built by this
-    # lambda (study_lookup_table, awards, reporter_dqaudit,
-    # progress_tracker, pi_emails, engagement_flags, po_emails) all use
-    # DB_NAME, unchanged. reporter/research_networks are built by this
-    # lambda and may live elsewhere under DB_ENVIRONMENT -- separate
-    # connections, reused instead of opened twice when they resolve to the
-    # same database as DB_NAME (same pattern as _run_research_networks).
-    conn = connect_mysql()
+    # study_summary's own write + the 6 source tables not built by this
+    # lambda (study_lookup_table, awards, progress_tracker, pi_emails,
+    # engagement_flags, po_emails) all use DB_NAME, unchanged.
+    # reporter/research_networks/reporter_dqaudit are built by this lambda
+    # and may live elsewhere under DB_ENVIRONMENT -- separate connections,
+    # opened once per distinct database and reused (same _conn_for()
+    # pattern as _run_mysql_merge, now that there are 4 instead of 3).
     db_name = os.getenv("DB_NAME")
+    open_conns = {}
 
-    reporter_db = _resolve_db_name("reporter")
-    reporter_conn = conn if reporter_db == db_name else connect_mysql(database=reporter_db)
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
 
-    resnet_db = _resolve_db_name("research_networks")
-    resnet_conn = conn if resnet_db == db_name else (
-        reporter_conn if resnet_db == reporter_db else connect_mysql(database=resnet_db)
-    )
+    conn = _conn_for(db_name)
+    reporter_conn = _conn_for(_resolve_db_name("reporter"))
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
 
     try:
         result = update_study_summary(
-            conn, reporter_conn=reporter_conn, research_networks_conn=resnet_conn
+            conn,
+            reporter_conn=reporter_conn,
+            research_networks_conn=resnet_conn,
+            reporter_dqaudit_conn=dqaudit_conn,
         )
     finally:
-        for c in {conn, reporter_conn, resnet_conn}:
+        for c in open_conns.values():
             c.close()
     return result
 
@@ -229,12 +237,46 @@ def _run_mysql_merge():
     return result
 
 
+def _run_reporter_dqaudit():
+    # No genuinely external inputs here -- nihtables, research_networks,
+    # and heal_awards_reporter_sn are all themselves built by this lambda,
+    # so nothing needs DB_NAME directly. nihtables is ALWAYS tempspace (see
+    # tables/mysql_merge.py); the other two follow DB_ENVIRONMENT like
+    # reporter_dqaudit itself. Same _conn_for() reuse pattern as
+    # _run_mysql_merge/_run_study_summary.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    nihtables_conn = _conn_for(TEMPSPACE_DB_NAME)
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    heal_sn_conn = _conn_for(_resolve_db_name("heal_awards_reporter_sn"))
+    write_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+
+    try:
+        result = update_reporter_dqaudit(
+            write_conn,
+            write_conn=write_conn,
+            nihtables_conn=nihtables_conn,
+            research_networks_conn=resnet_conn,
+            heal_awards_reporter_sn_conn=heal_sn_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
     "research_networks":     _run_research_networks,          # must run before study_summary
     "mysql_merge":            _run_mysql_merge,                # must run after reporter + research_networks
-    "study_summary":          _run_study_summary,
+    "reporter_dqaudit":       _run_reporter_dqaudit,           # must run after mysql_merge + research_networks + heal_awards_reporter_sn
+    "study_summary":          _run_study_summary,              # must run after reporter_dqaudit
     # Future tables — add entries here, e.g.:
     # "engagement_flags": _run_engagement_flags,
     # "awards":           _run_awards,
@@ -254,6 +296,7 @@ _TABLE_NAME_ENV = {
     "reporter":               ("REPORTER_TABLE_NAME", "reporter"),
     "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn"),
     "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks"),
+    "reporter_dqaudit":       ("REPORTER_DQAUDIT_TABLE_NAME", "reporter_dqaudit"),
     "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary"),
 }
 

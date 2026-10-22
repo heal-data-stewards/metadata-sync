@@ -177,21 +177,25 @@ def _build_resnet(gt_file: pd.DataFrame, resnet_df: pd.DataFrame) -> pd.DataFram
 # Build function
 # ---------------------------------------------------------------------------
 
-def _build_study_summary(conn, reporter_conn=None, research_networks_conn=None) -> pd.DataFrame:
+def _build_study_summary(
+    conn, reporter_conn=None, research_networks_conn=None, reporter_dqaudit_conn=None
+) -> pd.DataFrame:
     """
     Read all source tables and return the denormalized study summary DataFrame.
 
-    reporter_conn/research_networks_conn: separate connections for the two
-    source tables *this lambda itself builds* (reporter, research_networks),
-    which can live in a different database than everything else here under
-    the tempspace/healstudies split -- default to `conn` so callers that
-    don't care (everything stays in one database) are unaffected. The other
-    7 source tables (study_lookup_table, awards, reporter_dqaudit,
-    progress_tracker, pi_emails, engagement_flags, po_emails) are either
-    genuinely external or not yet ported, so they always read via `conn`.
+    reporter_conn/research_networks_conn/reporter_dqaudit_conn: separate
+    connections for the three source tables *this lambda itself builds*
+    (reporter, research_networks, reporter_dqaudit), which can live in a
+    different database than everything else here under the
+    tempspace/healstudies split -- default to `conn` so callers that don't
+    care (everything stays in one database) are unaffected. The other 6
+    source tables (study_lookup_table, awards, progress_tracker, pi_emails,
+    engagement_flags, po_emails) are either genuinely external or not yet
+    ported, so they always read via `conn`.
     """
     reporter_conn = reporter_conn or conn
     research_networks_conn = research_networks_conn or conn
+    reporter_dqaudit_conn = reporter_dqaudit_conn or conn
 
     logger.info("Reading source tables from MySQL")
     gt_file = _read_table(conn, "study_lookup_table")
@@ -206,7 +210,7 @@ def _build_study_summary(conn, reporter_conn=None, research_networks_conn=None) 
     awards_df   = _read_table(conn, "awards").dropna(how="all")
     reporter_df = _read_table(reporter_conn, "reporter").dropna(how="all")
     try:
-        rpt_dq = _read_table(conn, "reporter_dqaudit").dropna(how="all")
+        rpt_dq = _read_table(reporter_dqaudit_conn, "reporter_dqaudit").dropna(how="all")
         reporter_df = pd.concat([reporter_df, rpt_dq], ignore_index=True)
         logger.info("  reporter + reporter_dqaudit combined: %d rows", len(reporter_df))
     except Exception:
@@ -407,19 +411,23 @@ def _write_study_summary(conn, df: pd.DataFrame, table: str) -> None:
 # ---------------------------------------------------------------------------
 
 def update_study_summary(
-    conn, target_table: str | None = None, reporter_conn=None, research_networks_conn=None
+    conn,
+    target_table: str | None = None,
+    reporter_conn=None,
+    research_networks_conn=None,
+    reporter_dqaudit_conn=None,
 ) -> dict:
     """
     Rebuild the study_summary table from all source MySQL tables.
 
     Args:
         conn:         mysql.connector connection (from db.connect_mysql()),
-                      used for study_summary's own write and for the 7
+                      used for study_summary's own write and for the 6
                       source tables that aren't built by this lambda.
         target_table: Table name to write; defaults to STUDY_SUMMARY_TABLE_NAME
-                      env var or 'study_summary_test'.
-        reporter_conn / research_networks_conn: see _build_study_summary().
-                      Default to `conn` if not given.
+                      env var or 'study_summary'.
+        reporter_conn / research_networks_conn / reporter_dqaudit_conn: see
+                      _build_study_summary(). Default to `conn` if not given.
 
     Returns:
         dict with keys: table, rows_written
@@ -427,7 +435,12 @@ def update_study_summary(
     import os
     if target_table is None:
         target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary")
-    df = _build_study_summary(conn, reporter_conn=reporter_conn, research_networks_conn=research_networks_conn)
+    df = _build_study_summary(
+        conn,
+        reporter_conn=reporter_conn,
+        research_networks_conn=research_networks_conn,
+        reporter_dqaudit_conn=reporter_dqaudit_conn,
+    )
     df = _prepare_for_mysql(df)
     _write_study_summary(conn, df, target_table)
     return {"table": target_table, "rows_written": len(df)}
