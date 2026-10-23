@@ -105,8 +105,8 @@ _TEMPLATE_COLS = [
 # ---------------------------------------------------------------------------
 
 def normalize_id_series(series: pd.Series) -> pd.Series:
-    series = series.astype(str).str.strip()
-    series = series.replace({"nan": "", "NaN": "", ".": ""})
+    series = series.fillna("").astype(str).str.strip()
+    series = series.replace({"nan": "", "NaN": "", "None": "", ".": ""})
     series = series.str.replace(r"^(\d+)\.0$", r"\1", regex=True)
     return series
 
@@ -134,7 +134,7 @@ def is_empty_series(series: pd.Series) -> pd.Series:
 def clean_string_columns(df: pd.DataFrame, columns) -> pd.DataFrame:
     for col in columns:
         if col in df.columns:
-            df[col] = df[col].astype(str).replace({"nan": "", "NaN": ""})
+            df[col] = df[col].fillna("").astype(str).replace({"nan": "", "NaN": "", "None": ""})
     return df
 
 
@@ -239,12 +239,12 @@ def _build_candidates(mysql_merged_df: pd.DataFrame, reporter_dqaudit_df: pd.Dat
     mysql_df = mysql_df[mysql_df["entity_type"].fillna("Study").isin(_STANDARD_ENTITY_TYPES)].copy()
 
     mysql_df = mysql_df[~is_empty_series(mysql_df.get("appl_id", pd.Series(dtype=str)))].copy()
-    mysql_df["appl_id"] = mysql_df["appl_id"].astype(str)
+    mysql_df["appl_id"] = mysql_df["appl_id"].fillna("").astype(str)
 
     appls_in_reporter = mysql_df[["appl_id"]].drop_duplicates().assign(in_reporter_table=1)
 
     reporter_dqaudit_df = reporter_dqaudit_df.copy()
-    reporter_dqaudit_df["appl_id"] = reporter_dqaudit_df["appl_id"].astype(str)
+    reporter_dqaudit_df["appl_id"] = reporter_dqaudit_df["appl_id"].fillna("").astype(str)
     reporter_dqaudit_df = reporter_dqaudit_df[~reporter_dqaudit_df["appl_id"].isin(appls_in_reporter["appl_id"])]
     if "fisc_yr" in reporter_dqaudit_df.columns:
         reporter_dqaudit_df["fisc_yr"] = pd.to_numeric(reporter_dqaudit_df["fisc_yr"], errors="coerce").astype("Int64")
@@ -256,7 +256,7 @@ def _build_candidates(mysql_merged_df: pd.DataFrame, reporter_dqaudit_df: pd.Dat
 
     combined_df = pd.concat([mysql_df, reporter_dqaudit_df], ignore_index=True, sort=False)
     combined_df["in_mysql"] = combined_df["in_mysql"].fillna(0).astype(int)
-    combined_df["appl_id"] = combined_df["appl_id"].astype(str)
+    combined_df["appl_id"] = combined_df["appl_id"].fillna("").astype(str)
 
     combined_df = clean_string_columns(combined_df, STEWARDS_ID_VARS)
     combined_df["xstudy_id_stewards"] = group_ids(combined_df, STEWARDS_ID_VARS, "xstudy_id_stewards")
@@ -507,7 +507,7 @@ def _apply_ledger(candidate_rows: pd.DataFrame, ledger_df: pd.DataFrame, maxid2:
         .drop_duplicates().sort_values("xstudy_id_stewards").copy()
     )
     studyidgood5e_2["hdp_id"] = ""
-    studyidgood5e_2["compound_key"] = studyidgood5e_2["appl_id"].astype(str) + "_"
+    studyidgood5e_2["compound_key"] = studyidgood5e_2["appl_id"].fillna("").astype(str) + "_"
     studyidgood5e_2["tempn"] = group_ids(studyidgood5e_2, ["xstudy_id_stewards"], "tempn")
     studyidgood5e_2["study_id"] = studyidgood5e_2["tempn"].add(maxid2)
     studyidgood5e_2 = studyidgood5e_2[["study_id", "appl_id", "hdp_id", "compound_key"]].copy()
