@@ -5,14 +5,36 @@ metrics computed from mysql_merged and study_lookup_table, plus two
 raw-data drill-down sheets, and writes the filled workbook back to S3 as
 a new report.
 
-Mirrors mysql_code/python_scripts/HEAL_09_StudyMetrics.py, with one fix:
-the original hardcodes wb["8. Repository Names"], but the template's
-actual sheet name is "7. Repository Names" -- a KeyError that silently
-truncates every real run partway through step 7. Confirmed against the
-real Sept 2026 production output: everything from the repo-breakdown
-sheet onward (VLMD-on-Platform count, data-linked count, the CTN/MySQL
-study/MySQL award counts, and both drill-down sheets) is blank there.
-This port uses the template's real sheet name and runs to completion.
+Mirrors mysql_code/python_scripts/HEAL_09_StudyMetrics.py, with two fixes:
+
+1. The original hardcodes wb["8. Repository Names"], but the template's
+   actual sheet name is "7. Repository Names" -- a KeyError that silently
+   truncates every real run partway through step 7. Confirmed against the
+   real Sept 2026 production output: everything from the repo-breakdown
+   sheet onward (VLMD-on-Platform count, data-linked count, the CTN/MySQL
+   study/MySQL award counts, and both drill-down sheets) is blank there.
+   This port uses the template's real sheet name and runs to completion.
+
+2. The main "metrics" base dataset used merge_awards_mds != "In MDS only",
+   which is backwards. Cross-checked against mysql_code/stata_scripts/
+   HEAL_09_StudyMetrics.do (the Stata original this script was itself
+   ported from): "drop if merge_awards_mds==1 /* keep only records that
+   appear in Platform */". Stata's merge code 1 is the master-only side;
+   tables/mysql_merge.py's own indicator=... map confirms the master
+   (left) side is "In MySQL only" (merge_awards_mds's left_only ->
+   "In MySQL only", right_only -> "In MDS only"). So the original script
+   drops "In MySQL only" to keep Platform-registered records -- the
+   Python port (and this port, until this fix) instead dropped
+   "In MDS only", which is the inverse. CTN protocols, ICPSR, Intramural,
+   and most "Other" entities are registered on the Platform but have no
+   matching NIH award in MySQL's awards table, so they're almost entirely
+   "In MDS only" -- the inverted filter silently excluded nearly all of
+   them, undercounting total HEAL studies and zeroing out the CTN/Other
+   breakdown. The CTN-protocol-count step (C76) and the MySQL-awards
+   steps (C80/C83-85) are unaffected -- see build_study_metrics for which
+   base each one actually uses, matching the Stata original's own three
+   different bases (metrics: drop "In MySQL only"; CTN count: no filter
+   at all; awards: drop "In MDS only", Stata's merge code 2).
 
 Metric #9 ("studies with VLMD available in HSS") is not computed here,
 same as the original -- its own comment says to see a separate report.
@@ -71,9 +93,11 @@ def build_study_metrics(
     template_bytes: bytes,
     run_date: str,
 ) -> bytes:
-    mysql_01 = mysql_merged_df[mysql_merged_df["merge_awards_mds"] != "In MDS only"].copy()
-    metrics = mysql_01[mysql_01["guid_type"].isin(["discovery_metadata", "unregistered_discovery_metadata"])].copy()
-    logger.info("study_metrics: mysql_01=%d rows, metrics=%d rows", len(mysql_01), len(metrics))
+    # Platform-registered records (drop "In MySQL only" -- see module
+    # docstring fix #2): the base for every "studies" metric below.
+    metrics_base = mysql_merged_df[mysql_merged_df["merge_awards_mds"] != "In MySQL only"].copy()
+    metrics = metrics_base[metrics_base["guid_type"].isin(["discovery_metadata", "unregistered_discovery_metadata"])].copy()
+    logger.info("study_metrics: metrics_base=%d rows, metrics=%d rows", len(metrics_base), len(metrics))
 
     wb = load_workbook(io.BytesIO(template_bytes))
     ws = wb["Metrics"]
@@ -143,13 +167,20 @@ def build_study_metrics(
     ws["C70"] = int((producing_sharing["data_linked_on_platform"] == "No").sum())
 
     # --- 11. Other: MySQL entities and awards ---
-    ctn = mysql_01[mysql_01["mds_ctn_flag"] == "1"]
+    # CTN protocol count: no merge_awards_mds filter in the Stata original
+    # at all -- just mds_ctn_flag, against the full unfiltered table.
+    ctn = mysql_merged_df[mysql_merged_df["mds_ctn_flag"] == "1"]
     ws["C76"] = len(ctn)
 
     xstudy_id = pd.to_numeric(study_lookup_df["xstudy_id"], errors="coerce")
     ws["C78"] = int(xstudy_id.nunique())
 
-    awards = mysql_01[mysql_01["appl_id"] != ""][["appl_id", "entity_type"]].drop_duplicates(subset="appl_id")
+    # Number of MySQL awards / awards by entity type: a DIFFERENT base
+    # than `metrics` above -- Stata drops "In MDS only" here (merge code
+    # 2), the opposite of the "In MySQL only" drop metrics_base uses,
+    # since an "award" by definition comes from the MySQL/awards side.
+    awards_base = mysql_merged_df[mysql_merged_df["merge_awards_mds"] != "In MDS only"]
+    awards = awards_base[awards_base["appl_id"] != ""][["appl_id", "entity_type"]].drop_duplicates(subset="appl_id")
     ws["C80"] = len(awards)
     ws["C83"] = int((awards["entity_type"] == "Study").sum())
     ws["C84"] = int((awards["entity_type"] == "CTN").sum())
