@@ -317,9 +317,13 @@ def _run_study_manual_match_candidates():
 
 
 def _run_study_lookup_table():
-    # Finalizes study_lookup_table -- reshuffles every xstudy_id in it, so
-    # this is deliberately a separate, independently-triggered registry
-    # entry rather than something that runs automatically on every "all".
+    # Finalizes study_lookup_table from whatever the ledger currently says
+    # (see _run_study_manual_match_candidates, which runs immediately
+    # before this in _ALL_TABLES and advances that ledger). This reshuffles
+    # every xstudy_id in the table -- expected and harmless, since every
+    # downstream table in the same "all" run reads the freshly-finalized
+    # copy, not a stale one; see study_lookup_table.py's own module
+    # docstring for why xstudy_id isn't meant to be stable across runs.
     # mysql_merged is ALWAYS tempspace; reporter_dqaudit/study_lookup_table
     # (the write target) follow DB_ENVIRONMENT.
     open_conns = {}
@@ -483,8 +487,8 @@ TABLE_REGISTRY = {
     "research_networks":     _run_research_networks,          # must run before study_summary
     "mysql_merge":            _run_mysql_merge,                # must run after reporter + research_networks
     "reporter_dqaudit":       _run_reporter_dqaudit,           # must run after mysql_merge + research_networks + heal_awards_reporter_sn
-    "study_manual_match_candidates": _run_study_manual_match_candidates,  # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
-    "study_lookup_table":     _run_study_lookup_table,         # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
+    "study_manual_match_candidates": _run_study_manual_match_candidates,  # must run after mysql_merge + reporter_dqaudit; must run immediately before study_lookup_table
+    "study_lookup_table":     _run_study_lookup_table,         # must run after mysql_merge + reporter_dqaudit + study_manual_match_candidates
     "engagement_flags":       _run_engagement_flags,           # must run after mysql_merge + research_networks + study_lookup_table
     "alldata":                _run_alldata,                    # must run after mysql_merge + reporter_dqaudit + study_lookup_table + engagement_flags + research_networks
     "study_summary":          _run_study_summary,              # must run after reporter_dqaudit + engagement_flags (+ study_lookup_table, once finalized)
@@ -495,12 +499,22 @@ TABLE_REGISTRY = {
     # "awards":           _run_awards,
 }
 
-# study_manual_match_candidates and study_lookup_table are both registered
-# above but deliberately excluded from "all": finalizing study_lookup_table
-# reshuffles every xstudy_id in it, which should happen when a human
-# decides to run it -- after reviewing whatever the candidates step
-# surfaced -- not silently on every scheduled sync.
-_EXCLUDED_FROM_ALL = {"study_manual_match_candidates", "study_lookup_table"}
+# Nothing is excluded from "all" anymore. study_manual_match_candidates'
+# own generate_match_candidates() is designed to be safely re-run on every
+# invocation -- it absorbs whatever decisions a human has already
+# uploaded into the pending file, archives that pending file (timestamped),
+# and writes a fresh one containing only whatever's still genuinely
+# undecided. Its own result dict (pending_rows/newly_decided/ledger_rows)
+# already flows through the generic per-table Slack notification below, so
+# "there's a new list of matches needing review" surfaces there -- no
+# separate alerting needed. study_lookup_table's own finalize step then
+# leaves anything not yet in the ledger as an unresolved duplicate row
+# rather than blocking, so running it with a partially-reviewed ledger is
+# safe; the next "all" run (after a human uploads more decisions) just
+# finalizes a little more of it. One side effect: this means a timestamped
+# pending-file archive gets written to S3 on every "all" run, not only
+# when something actually changed -- harmless, just a bit more S3 noise.
+_EXCLUDED_FROM_ALL = set()
 
 # Explicit execution order for {"table": "all"} -- NOT derived from
 # TABLE_REGISTRY's own key order. Python dicts preserve insertion order, so
@@ -511,26 +525,29 @@ _EXCLUDED_FROM_ALL = {"study_manual_match_candidates", "study_lookup_table"}
 # order is an intentional, reviewable fact, not an accident of dict layout.
 #
 # Dependency chain (why this order):
-#   reporter                  -- no dependencies
-#   heal_awards_reporter_sn   -- after reporter
-#   research_networks         -- no dependencies; must run before mysql_merge/study_summary
-#   mysql_merge                -- after reporter + research_networks
-#   reporter_dqaudit            -- after mysql_merge + research_networks + heal_awards_reporter_sn
-#   engagement_flags             -- after mysql_merge + research_networks + study_lookup_table
-#                                   (study_lookup_table is excluded from "all" -- see above --
-#                                    so this reads whatever copy already exists in MySQL)
-#   alldata                       -- after mysql_merge + reporter_dqaudit + study_lookup_table
-#                                     + engagement_flags + research_networks
-#   study_summary                  -- after reporter_dqaudit + engagement_flags (+ study_lookup_table)
-#   qc_report                       -- after mysql_merge + study_lookup_table; report only, no MySQL table
-#   gtd_targets                      -- after alldata; report only, no MySQL table
-#   study_metrics                    -- after mysql_merge + study_lookup_table; report only, no MySQL table
+#   reporter                      -- no dependencies
+#   heal_awards_reporter_sn       -- after reporter
+#   research_networks             -- no dependencies; must run before mysql_merge/study_summary
+#   mysql_merge                    -- after reporter + research_networks
+#   reporter_dqaudit                -- after mysql_merge + research_networks + heal_awards_reporter_sn
+#   study_manual_match_candidates    -- after mysql_merge + reporter_dqaudit; must run immediately
+#                                        before study_lookup_table (advances the ledger it reads)
+#   study_lookup_table                -- after mysql_merge + reporter_dqaudit + study_manual_match_candidates
+#   engagement_flags                   -- after mysql_merge + research_networks + study_lookup_table
+#   alldata                             -- after mysql_merge + reporter_dqaudit + study_lookup_table
+#                                          + engagement_flags + research_networks
+#   study_summary                        -- after reporter_dqaudit + engagement_flags + study_lookup_table
+#   qc_report                             -- after mysql_merge + study_lookup_table; report only, no MySQL table
+#   gtd_targets                            -- after alldata; report only, no MySQL table
+#   study_metrics                           -- after mysql_merge + study_lookup_table; report only, no MySQL table
 _ALL_TABLES = [
     "reporter",
     "heal_awards_reporter_sn",
     "research_networks",
     "mysql_merge",
     "reporter_dqaudit",
+    "study_manual_match_candidates",
+    "study_lookup_table",
     "engagement_flags",
     "alldata",
     "study_summary",
