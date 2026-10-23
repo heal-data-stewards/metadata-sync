@@ -7,19 +7,27 @@ override, for tables that read or write a different database than DB_NAME
 var, not DB_NAME, decides where it lands; see tables/research_networks.py
 for the pattern). Omit it for the original single-database behavior.
 
-clean_mysql_value/format_mysql_write_value fix two related bugs discovered
-by diffing real Lambda output against the original Stata-era CSVs:
-mysql.connector returns native Python types for non-VARCHAR MySQL columns
--- a SET column comes back as a Python `set` (str()'d naively as
-"{'x'}", or "set()" when empty) and a numeric column comes back as
-float/Decimal (str()'d naively as "247500.0" for a whole number) -- both
-break equality/string comparisons against values that were always plain
-strings elsewhere in this pipeline. Every table module's own _read_table/
-_write_table should route through these instead of a bare str()/isinstance
-check, so a fix here reaches all of them -- the SET-flattening fix had
-previously been added only to study_summary.py's own copy and silently
-never made it into the other four modules' copies, which is exactly the
-failure mode importing a shared helper avoids.
+clean_mysql_value/format_mysql_write_value fix several related bugs
+discovered by diffing real Lambda output against the original Stata-era
+CSVs: mysql.connector returns native Python types for non-VARCHAR MySQL
+columns -- a SET column comes back as a Python `set` (str()'d naively as
+"{'x'}", or "set()" when empty), a numeric column comes back as
+float/Decimal (str()'d naively as "247500.0" for a whole number), and a
+TEXT column that's missing comes back as an empty string '' rather than
+SQL NULL/Python None (unlike the original pipeline's CSVs, where
+pd.read_csv's default NA handling silently turned every blank cell into
+NaN regardless of whether the source was NULL or '' -- that equivalence
+doesn't hold once reads go straight to MySQL instead of through a CSV).
+Any check elsewhere in this pipeline that relies on .isna() to detect
+"missing" silently stops working for a column whose real value is ''
+unless this normalizes it first. All of these break equality/string/
+missingness comparisons against values that were always plain strings
+(or a clean NaN) elsewhere in this pipeline. Every table module's own
+_read_table/_write_table should route through these instead of a bare
+str()/isinstance check, so a fix here reaches all of them -- the
+SET-flattening fix had previously been added only to study_summary.py's
+own copy and silently never made it into the other four modules' copies,
+which is exactly the failure mode importing a shared helper avoids.
 """
 
 import datetime as _dt
@@ -56,6 +64,8 @@ def clean_mysql_value(v):
     every column right after SELECT * -- see module docstring for why."""
     if v is None:
         return None
+    if isinstance(v, str) and v == "":
+        return None
     if isinstance(v, set):
         return ",".join(sorted(v)) if v else None
     if isinstance(v, (float, Decimal)):
@@ -80,8 +90,14 @@ def format_mysql_write_value(v):
     date instead of picking up a spurious 00:00:00 time -- and the same
     whole-number-float rule, so a column that upcast to float64 along the
     way (e.g. via pd.to_numeric(), or a merge introducing NaN into what
-    was an int column) round-trips as "2020", not "2020.0"."""
+    was an int column) round-trips as "2020", not "2020.0". Also writes a
+    genuine SQL NULL for an empty string, same as clean_mysql_value does on
+    the read side -- otherwise a '' produced by some .fillna("") along the
+    way would round-trip back into MySQL as '' again, undoing the read-side
+    fix for the next run that reads it."""
     if pd.isna(v):
+        return None
+    if isinstance(v, str) and v == "":
         return None
     if isinstance(v, (pd.Timestamp, _dt.datetime)):
         return v.strftime("%Y-%m-%d") if v.time() == _dt.time(0, 0, 0) else v.strftime("%Y-%m-%d %H:%M:%S")
