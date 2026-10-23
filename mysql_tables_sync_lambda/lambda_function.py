@@ -39,6 +39,8 @@ Include these files alongside lambda_function.py when deploying:
   - tables/mysql_merge.py
   - tables/reporter_dqaudit.py
   - tables/study_lookup_table.py
+  - tables/engagement_flags.py
+  - tables/alldata.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
 
@@ -82,6 +84,8 @@ from tables.research_networks import update_research_networks
 from tables.mysql_merge import update_mysql_merge
 from tables.reporter_dqaudit import update_reporter_dqaudit
 from tables.study_lookup_table import generate_match_candidates, update_study_lookup_table
+from tables.engagement_flags import update_engagement_flags
+from tables.alldata import update_alldata
 
 load_dotenv()
 
@@ -115,6 +119,8 @@ TABLE_PRODUCTION_DB = {
     "study_summary": "healstudies",
     "reporter_dqaudit": "healstudies",
     "study_lookup_table": "healstudies",
+    "engagement_flags": "healstudies",
+    "alldata": "healstudies",
 }
 
 
@@ -142,13 +148,13 @@ def _run_reporter():
 
 
 def _run_study_summary():
-    # study_summary's own write + the 5 source tables not built by this
-    # lambda (awards, progress_tracker, pi_emails, engagement_flags,
-    # po_emails) all use DB_NAME, unchanged. reporter/research_networks/
-    # reporter_dqaudit/study_lookup_table are built by this lambda and may
+    # study_summary's own write + the 4 source tables not built by this
+    # lambda (awards, progress_tracker, pi_emails, po_emails) all use
+    # DB_NAME, unchanged. reporter/research_networks/reporter_dqaudit/
+    # study_lookup_table/engagement_flags are built by this lambda and may
     # live elsewhere under DB_ENVIRONMENT -- separate connections, opened
     # once per distinct database and reused (same _conn_for() pattern as
-    # _run_mysql_merge, now that there are 5 instead of 4).
+    # _run_mysql_merge, now that there are 6 instead of 5).
     db_name = os.getenv("DB_NAME")
     open_conns = {}
 
@@ -162,6 +168,7 @@ def _run_study_summary():
     resnet_conn = _conn_for(_resolve_db_name("research_networks"))
     dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
     study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    engagement_flags_conn = _conn_for(_resolve_db_name("engagement_flags"))
 
     try:
         result = update_study_summary(
@@ -170,6 +177,7 @@ def _run_study_summary():
             research_networks_conn=resnet_conn,
             reporter_dqaudit_conn=dqaudit_conn,
             study_lookup_table_conn=study_lookup_conn,
+            engagement_flags_conn=engagement_flags_conn,
         )
     finally:
         for c in open_conns.values():
@@ -326,6 +334,71 @@ def _run_study_lookup_table():
     return result
 
 
+def _run_engagement_flags():
+    # No genuinely external inputs -- nihtables, research_networks, and
+    # study_lookup_table are all themselves built by this lambda. nihtables
+    # is ALWAYS tempspace; the other two follow DB_ENVIRONMENT like
+    # engagement_flags itself.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    nihtables_conn = _conn_for(TEMPSPACE_DB_NAME)
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    write_conn = _conn_for(_resolve_db_name("engagement_flags"))
+
+    try:
+        result = update_engagement_flags(
+            write_conn,
+            write_conn=write_conn,
+            nihtables_conn=nihtables_conn,
+            research_networks_conn=resnet_conn,
+            study_lookup_table_conn=study_lookup_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_alldata():
+    # pi_emails/progress_tracker: external, always DB_NAME. mysql_merged:
+    # ALWAYS tempspace. reporter_dqaudit/study_lookup_table/
+    # engagement_flags/alldata (the write target) follow DB_ENVIRONMENT.
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    engagement_flags_conn = _conn_for(_resolve_db_name("engagement_flags"))
+    write_conn = _conn_for(_resolve_db_name("alldata"))
+
+    try:
+        result = update_alldata(
+            conn,
+            write_conn=write_conn,
+            mysql_merged_conn=mysql_merged_conn,
+            reporter_dqaudit_conn=reporter_dqaudit_conn,
+            study_lookup_table_conn=study_lookup_conn,
+            engagement_flags_conn=engagement_flags_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
@@ -334,9 +407,10 @@ TABLE_REGISTRY = {
     "reporter_dqaudit":       _run_reporter_dqaudit,           # must run after mysql_merge + research_networks + heal_awards_reporter_sn
     "study_manual_match_candidates": _run_study_manual_match_candidates,  # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
     "study_lookup_table":     _run_study_lookup_table,         # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
-    "study_summary":          _run_study_summary,              # must run after reporter_dqaudit (+ study_lookup_table, once finalized)
+    "engagement_flags":       _run_engagement_flags,           # must run after mysql_merge + research_networks + study_lookup_table
+    "alldata":                _run_alldata,                    # must run after mysql_merge + reporter_dqaudit + study_lookup_table + engagement_flags
+    "study_summary":          _run_study_summary,              # must run after reporter_dqaudit + engagement_flags (+ study_lookup_table, once finalized)
     # Future tables — add entries here, e.g.:
-    # "engagement_flags": _run_engagement_flags,
     # "awards":           _run_awards,
 }
 
@@ -363,6 +437,8 @@ _TABLE_NAME_ENV = {
     "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks"),
     "reporter_dqaudit":       ("REPORTER_DQAUDIT_TABLE_NAME", "reporter_dqaudit"),
     "study_lookup_table":     ("STUDY_LOOKUP_TABLE_NAME", "study_lookup_table"),
+    "engagement_flags":       ("ENGAGEMENT_FLAGS_TABLE_NAME", "engagement_flags"),
+    "alldata":                ("ALLDATA_TABLE_NAME", "alldata"),
     "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary"),
 }
 
