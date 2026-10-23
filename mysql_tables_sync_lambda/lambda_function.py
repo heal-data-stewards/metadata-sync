@@ -104,10 +104,6 @@ logger = logging.getLogger(__name__)
 S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
 MANUAL_INPUTS_PREFIX = os.getenv("MANUAL_INPUTS_PREFIX", "mysql_tables_sync/inputs")
 
-# Generated report files (QC report, GTD targets) are outputs, not manual
-# inputs -- they live in their own sibling prefix, not MANUAL_INPUTS_PREFIX.
-REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", "mysql_tables_sync/reports")
-
 # ---------------------------------------------------------------------------
 # tempspace/healstudies database routing -- one shared mechanism, not a
 # per-table env var. See the module docstring's "tempspace/healstudies
@@ -117,6 +113,18 @@ REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", "mysql_tables_sync/reports")
 TEMPSPACE_DB_NAME = os.getenv("TEMPSPACE_DB_NAME", "tempspace")
 HEALSTUDIES_DB_NAME = os.getenv("HEALSTUDIES_DB_NAME", "healstudies")
 DB_ENVIRONMENT = os.getenv("DB_ENVIRONMENT", "test").lower().strip()
+
+# Generated report files (QC report, GTD targets, study metrics) are
+# outputs, not manual inputs -- they live in their own sibling prefix, not
+# MANUAL_INPUTS_PREFIX. Scoped by DB_ENVIRONMENT, same as every MySQL
+# write already is: without this, mysql_tables_sync_test and
+# mysql_tables_sync (production) would silently overwrite each other's
+# report files at the exact same S3 key, with no table-name-level
+# separation to catch it (unlike MySQL tables, which at least live in
+# different databases). query_mysql_tables_lambda's queries/reports.py
+# derives this same path independently (it's a separate deployment) --
+# keep the two in sync if this default ever changes.
+REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", f"mysql_tables_sync/reports/{DB_ENVIRONMENT}")
 
 # Each table's home database when DB_ENVIRONMENT=production. Add a line
 # here, not a new env var, as each table's real home gets decided -- tables

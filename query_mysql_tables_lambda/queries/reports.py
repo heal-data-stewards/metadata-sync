@@ -11,6 +11,18 @@ which risks API Gateway's hard synchronous timeout. This lambda is the
 one externally-callable surface, so "trigger" here means an async,
 fire-and-forget boto3 lambda.invoke -- the caller polls get_download_url
 afterward and compares its last_modified to when they triggered.
+
+DB_ENVIRONMENT here mirrors mysql_tables_sync_lambda's own env var of the
+same name (default "test", the safe choice) -- this is a SEPARATE Lambda
+deployment, so it can't share that module's Python state, but the
+derived REPORTS_PREFIX/SYNC_FUNCTION_NAME below must still land on
+exactly the S3 path and sync-function pair that THAT deployment's own
+DB_ENVIRONMENT would produce, or get_download_url/trigger_regenerate
+silently talk to the wrong environment's copy. Set DB_ENVIRONMENT on
+this lambda's own config to match the mysql_tables_sync_lambda it's
+meant to pair with (query_mysql_tables_test <-> mysql_tables_sync_test,
+both default "test"; query_mysql_tables <-> mysql_tables_sync both need
+DB_ENVIRONMENT=production explicitly set).
 """
 
 import json
@@ -20,9 +32,14 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+DB_ENVIRONMENT = os.getenv("DB_ENVIRONMENT", "test").lower().strip()
+
 S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
-REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", "mysql_tables_sync/reports")
-SYNC_FUNCTION_NAME = os.getenv("MYSQL_TABLES_SYNC_FUNCTION_NAME", "mysql_tables_sync_test")
+REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", f"mysql_tables_sync/reports/{DB_ENVIRONMENT}")
+SYNC_FUNCTION_NAME = os.getenv(
+    "MYSQL_TABLES_SYNC_FUNCTION_NAME",
+    "mysql_tables_sync" if DB_ENVIRONMENT == "production" else "mysql_tables_sync_test",
+)
 
 _DEFAULT_EXPIRES_IN = 3600
 
