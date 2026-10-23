@@ -17,6 +17,8 @@ Available queries
   study_summary.funding_ic_freq        — administering IC frequencies
   study_summary.studies_by_repository  — studies that selected a given repository
   study_summary.get_resnet_resprog     — HDPIDs with their Research Program / Research Network
+  reports.get_download_url             — presigned S3 URL for a report's current .xlsx (param: report)
+  reports.trigger_regenerate           — async-trigger mysql_tables_sync_lambda to rebuild a report (param: report)
 
 Adding a new query
 ------------------
@@ -39,6 +41,7 @@ from queries.study_summary import (
     studies_by_repository,
     studies_ending_soon,
 )
+from queries.reports import get_download_url, trigger_regenerate
 
 load_dotenv()
 
@@ -52,11 +55,24 @@ QUERY_REGISTRY = {
     "funding_ic_freq":       funding_ic_freq,
     "get_resnet_resprog":    get_resnet_resprog,
     "studies_by_repository": studies_by_repository,
+    "get_download_url":      get_download_url,
+    "trigger_regenerate":    trigger_regenerate,
 }
+
+# Queries that don't touch MySQL at all (reports.*) -- skip the
+# connect_mysql() round trip for these rather than opening a connection
+# the query function will just ignore.
+_NO_DB_QUERIES = {"get_download_url", "trigger_regenerate"}
 
 _HEADERS = {
     "Content-Type": "application/json",
 }
+# CORS is handled by the Lambda Function URL's own CORS configuration
+# (AWS resource-level setting), not here. query_mysql_tables_test already
+# has it configured; setting Access-Control-Allow-Origin in this response
+# too produces a duplicate header ("*, *"), which browsers reject outright
+# -- confirmed against the real error. Configure CORS on the production
+# query_mysql_tables Function URL the same way instead of re-adding this.
 
 
 def _resolve_query_name(event):
@@ -105,7 +121,7 @@ def lambda_handler(event, context):
             }),
         }
 
-    conn = connect_mysql()
+    conn = None if name in _NO_DB_QUERIES else connect_mysql()
     try:
         result = QUERY_REGISTRY[name](conn, **extra_params)
     except Exception as e:
@@ -116,7 +132,8 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": str(e)}),
         }
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     return {
         "statusCode": 200,

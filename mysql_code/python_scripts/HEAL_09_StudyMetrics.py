@@ -111,7 +111,7 @@ mysql_00 = pd.read_csv(f"{out}/mysql_{today}.csv")
 log_out(f"mysql_00: Using mysql_today.csv' {mysql_00.shape}")
 
 # df = df[df["merge_awards_mds"] != 1]
-mysql_01 = mysql_00[mysql_00["merge_awards_mds"] != "In MDS only"]
+mysql_01 = mysql_00[mysql_00["merge_awards_mds"].astype(str).str[0] != '1']  #now that merge_awards_mds is labeled for readability
 log_out(f"mysql_01: exclude where merge_awards_mds = 1' {mysql_01.shape}")
 
 metrics = mysql_01[mysql_01["guid_type"].isin([
@@ -480,7 +480,7 @@ freq_repo_counts = pd.concat([freq_repo_counts, total_row], ignore_index=True)
 wb = load_workbook(f"{out}/StudyMetrics_{today}.xlsx")  
  
 # Select the worksheet to write to (e.g., "Report")  
-ws = wb["8. Repository Names"]  # Replace with your sheet name
+ws = wb["7. Repository Names"]  # Replace with your sheet name
 
 start_row = 3  # Excel row number 
 start_col = 1  # Excel column number 
@@ -677,7 +677,7 @@ studies["xstudy_id"] = pd.to_numeric(studies["xstudy_id"], errors="coerce")
 print("Number of MySQL studies:", studies["xstudy_id"].nunique())
 
 # MySQL awards
-awards_00 = mysql_01[mysql_01["merge_awards_mds"] != "In MDS only"]
+awards_00 = mysql_01[mysql_01["merge_awards_mds"].astype(str).str[0] != '2']
 awards_01 = awards_00[awards_00["appl_id"] != ""]
 # Select both columns, but only look at appl_id to find duplicates
 awards_02 = awards_01[["appl_id", "entity_type"]].drop_duplicates(subset=["appl_id"])

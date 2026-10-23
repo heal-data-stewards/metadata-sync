@@ -30,12 +30,40 @@ Lambda packaging notes
 ----------------------
 Include these files alongside lambda_function.py when deploying:
   - db.py
+  - sources.py
   - notify.py
   - tables/__init__.py
   - tables/reporter.py
   - tables/study_summary.py
+  - tables/research_networks.py
+  - tables/mysql_merge.py
+  - tables/reporter_dqaudit.py
+  - tables/study_lookup_table.py
+  - tables/engagement_flags.py
+  - tables/alldata.py
+  - tables/qc_report.py
+  - tables/gtd_targets.py
+  - tables/study_metrics.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
+
+tempspace/healstudies database split
+--------------------------------------
+Each table's *output* database is independent of its table-name env var
+(<TABLE>_TABLE_NAME, default "<table>" -- the real/production name in every
+environment, since tempspace vs. healstudies is what actually distinguishes
+test from production now; a "_test" suffix on top of that was redundant and
+confusing). Which database
+is a single shared choice, not a per-table env var: TEMPSPACE_DB_NAME and
+HEALSTUDIES_DB_NAME name the two real databases (defaults "tempspace" and
+"healstudies"), and DB_ENVIRONMENT ("test"/"production", default "test" --
+the safe choice) decides, once per deployed function, whether every table
+writes to tempspace regardless (test) or each table writes to whatever
+TABLE_PRODUCTION_DB below says (production). Adding a table's production
+home is one line in that dict, not a new env var. A table's *inputs*
+(e.g. research_networks reading `awards`) still come from wherever DB_NAME
+already points, unaffected by any of this -- only each table's own
+written-to database moves.
 
 Slack notifications
 --------------------
@@ -51,14 +79,74 @@ from dotenv import load_dotenv
 
 from db import connect_mysql, create_alchemy_engine
 from notify import notify_slack
+from sources import LocalExcelSource, S3ExcelSource
 from tables.reporter import update_reporter
 from tables.study_summary import update_study_summary
 from tables.heal_awards_reporter_sn import update_heal_awards_reporter_sn
+from tables.research_networks import update_research_networks
+from tables.mysql_merge import update_mysql_merge
+from tables.reporter_dqaudit import update_reporter_dqaudit
+from tables.study_lookup_table import generate_match_candidates, update_study_lookup_table
+from tables.engagement_flags import update_engagement_flags
+from tables.alldata import update_alldata
+from tables.qc_report import update_qc_report
+from tables.gtd_targets import update_gtd_targets
+from tables.study_metrics import update_study_metrics
 
 load_dotenv()
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
 logger = logging.getLogger(__name__)
+
+# Manual inputs (hand-maintained reference files a person uploads, rather
+# than anything synced automatically) live here. Same bucket convention as
+# package_board_lambda/monday_package_board_lambda's inputs.
+S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
+MANUAL_INPUTS_PREFIX = os.getenv("MANUAL_INPUTS_PREFIX", "mysql_tables_sync/inputs")
+
+# ---------------------------------------------------------------------------
+# tempspace/healstudies database routing -- one shared mechanism, not a
+# per-table env var. See the module docstring's "tempspace/healstudies
+# database split" section above.
+# ---------------------------------------------------------------------------
+
+TEMPSPACE_DB_NAME = os.getenv("TEMPSPACE_DB_NAME", "tempspace")
+HEALSTUDIES_DB_NAME = os.getenv("HEALSTUDIES_DB_NAME", "healstudies")
+DB_ENVIRONMENT = os.getenv("DB_ENVIRONMENT", "test").lower().strip()
+
+# Generated report files (QC report, GTD targets, study metrics) are
+# outputs, not manual inputs -- they live in their own sibling prefix, not
+# MANUAL_INPUTS_PREFIX. Scoped by DB_ENVIRONMENT, same as every MySQL
+# write already is: without this, mysql_tables_sync_test and
+# mysql_tables_sync (production) would silently overwrite each other's
+# report files at the exact same S3 key, with no table-name-level
+# separation to catch it (unlike MySQL tables, which at least live in
+# different databases). query_mysql_tables_lambda's queries/reports.py
+# derives this same path independently (it's a separate deployment) --
+# keep the two in sync if this default ever changes.
+REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", f"mysql_tables_sync/reports/{DB_ENVIRONMENT}")
+
+# Each table's home database when DB_ENVIRONMENT=production. Add a line
+# here, not a new env var, as each table's real home gets decided -- tables
+# not listed default to tempspace even in production (the safe choice when
+# nobody's explicitly decided otherwise yet).
+TABLE_PRODUCTION_DB = {
+    "research_networks": "healstudies",
+    "reporter": "healstudies",
+    "heal_awards_reporter_sn": "healstudies",
+    "study_summary": "healstudies",
+    "reporter_dqaudit": "healstudies",
+    "study_lookup_table": "healstudies",
+    "engagement_flags": "healstudies",
+    "alldata": "healstudies",
+}
+
+
+def _resolve_db_name(table_key: str) -> str:
+    """Which database table_key writes to, given DB_ENVIRONMENT."""
+    if DB_ENVIRONMENT != "production":
+        return TEMPSPACE_DB_NAME
+    return HEALSTUDIES_DB_NAME if TABLE_PRODUCTION_DB.get(table_key) == "healstudies" else TEMPSPACE_DB_NAME
 
 # ---------------------------------------------------------------------------
 # Table registry
@@ -66,42 +154,446 @@ logger = logging.getLogger(__name__)
 # Each entry: table_key -> callable that performs the update and returns a dict.
 # Order matters for "all" — tables listed earlier run first.
 # reporter must precede study_summary (study_summary reads from reporter).
+# research_networks must also precede study_summary (same reason).
 # ---------------------------------------------------------------------------
 
 def _run_reporter():
-    engine = create_alchemy_engine()
-    return update_reporter(engine)
+    # awards is an external input, not built by this lambda -- stays on
+    # whatever DB_NAME already points to, regardless of DB_ENVIRONMENT.
+    write_engine = create_alchemy_engine(database=_resolve_db_name("reporter"))
+    read_engine = create_alchemy_engine()
+    return update_reporter(write_engine, read_engine=read_engine)
 
 
 def _run_study_summary():
-    conn = connect_mysql()
-    result = update_study_summary(conn)
-    conn.close()
+    # study_summary's own write + the 4 source tables not built by this
+    # lambda (awards, progress_tracker, pi_emails, po_emails) all use
+    # DB_NAME, unchanged. reporter/research_networks/reporter_dqaudit/
+    # study_lookup_table/engagement_flags are built by this lambda and may
+    # live elsewhere under DB_ENVIRONMENT -- separate connections, opened
+    # once per distinct database and reused (same _conn_for() pattern as
+    # _run_mysql_merge, now that there are 6 instead of 5).
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    reporter_conn = _conn_for(_resolve_db_name("reporter"))
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    engagement_flags_conn = _conn_for(_resolve_db_name("engagement_flags"))
+
+    try:
+        result = update_study_summary(
+            conn,
+            reporter_conn=reporter_conn,
+            research_networks_conn=resnet_conn,
+            reporter_dqaudit_conn=dqaudit_conn,
+            study_lookup_table_conn=study_lookup_conn,
+            engagement_flags_conn=engagement_flags_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
     return result
 
 
 def _run_heal_awards_reporter_sn():
-    engine = create_alchemy_engine()
-    return update_heal_awards_reporter_sn(engine)
+    # reporter is built by this same lambda, so read it from wherever
+    # _resolve_db_name("reporter") says it actually lives (moves together
+    # with it in test mode), not necessarily this table's own database.
+    write_engine = create_alchemy_engine(database=_resolve_db_name("heal_awards_reporter_sn"))
+    read_engine = create_alchemy_engine(database=_resolve_db_name("reporter"))
+    return update_heal_awards_reporter_sn(write_engine, read_engine=read_engine)
+
+
+def _run_research_networks():
+    # awards lives wherever DB_NAME already points (unchanged, existing
+    # behavior) -- only the *output* table's database is the
+    # tempspace/healstudies choice, via _resolve_db_name().
+    read_conn = connect_mysql()
+    write_db = _resolve_db_name("research_networks")
+    write_conn = read_conn if write_db == os.getenv("DB_NAME") else connect_mysql(database=write_db)
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+    try:
+        result = update_research_networks(read_conn, write_conn, ref_source)
+    finally:
+        read_conn.close()
+        if write_conn is not read_conn:
+            write_conn.close()
+    result["database"] = write_db
+    return result
+
+
+def _run_mysql_merge():
+    # awards: external, always DB_NAME. reporter/research_networks: built
+    # by this lambda, follow DB_ENVIRONMENT. progress_tracker: built by a
+    # separate lambda that writes to healstudies only -- no tempspace copy
+    # ever, so it's ALWAYS healstudies regardless of DB_ENVIRONMENT, same
+    # as nihtables/mysql_merged (the write target) are ALWAYS tempspace.
+    # Neither is in TABLE_PRODUCTION_DB (see tables/mysql_merge.py).
+    #
+    # Up to 5 distinct databases could be in play at once here, so connections
+    # are opened once per distinct database and reused, rather than the
+    # nested-reuse-or-not ternary _run_study_summary() uses for its 3.
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    reporter_conn = _conn_for(_resolve_db_name("reporter"))
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    progress_tracker_conn = _conn_for(HEALSTUDIES_DB_NAME)
+    write_conn = _conn_for(TEMPSPACE_DB_NAME)
+
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+    try:
+        result = update_mysql_merge(
+            conn, ref_source,
+            write_conn=write_conn, reporter_conn=reporter_conn, research_networks_conn=resnet_conn,
+            progress_tracker_conn=progress_tracker_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_reporter_dqaudit():
+    # No genuinely external inputs here -- nihtables, research_networks,
+    # and heal_awards_reporter_sn are all themselves built by this lambda,
+    # so nothing needs DB_NAME directly. nihtables is ALWAYS tempspace (see
+    # tables/mysql_merge.py); the other two follow DB_ENVIRONMENT like
+    # reporter_dqaudit itself. Same _conn_for() reuse pattern as
+    # _run_mysql_merge/_run_study_summary.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    nihtables_conn = _conn_for(TEMPSPACE_DB_NAME)
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    heal_sn_conn = _conn_for(_resolve_db_name("heal_awards_reporter_sn"))
+    write_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+
+    try:
+        result = update_reporter_dqaudit(
+            write_conn,
+            write_conn=write_conn,
+            nihtables_conn=nihtables_conn,
+            research_networks_conn=resnet_conn,
+            heal_awards_reporter_sn_conn=heal_sn_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_study_manual_match_candidates():
+    # Writes no MySQL table -- S3 only (the pending file + ledger +
+    # archive). mysql_merged is ALWAYS tempspace; reporter_dqaudit follows
+    # DB_ENVIRONMENT. Same _conn_for() reuse pattern as _run_reporter_dqaudit.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+
+    try:
+        result = generate_match_candidates(mysql_merged_conn, reporter_dqaudit_conn, ref_source)
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_study_lookup_table():
+    # Finalizes study_lookup_table from whatever the ledger currently says
+    # (see _run_study_manual_match_candidates, which runs immediately
+    # before this in _ALL_TABLES and advances that ledger). This reshuffles
+    # every xstudy_id in the table -- expected and harmless, since every
+    # downstream table in the same "all" run reads the freshly-finalized
+    # copy, not a stale one; see study_lookup_table.py's own module
+    # docstring for why xstudy_id isn't meant to be stable across runs.
+    # mysql_merged is ALWAYS tempspace; reporter_dqaudit/study_lookup_table
+    # (the write target) follow DB_ENVIRONMENT.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    write_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+
+    try:
+        result = update_study_lookup_table(
+            mysql_merged_conn, reporter_dqaudit_conn, ref_source, write_conn=write_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_engagement_flags():
+    # No genuinely external inputs -- nihtables, research_networks, and
+    # study_lookup_table are all themselves built by this lambda. nihtables
+    # is ALWAYS tempspace; the other two follow DB_ENVIRONMENT like
+    # engagement_flags itself.
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql(database=database)
+        return open_conns[database]
+
+    nihtables_conn = _conn_for(TEMPSPACE_DB_NAME)
+    resnet_conn = _conn_for(_resolve_db_name("research_networks"))
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    write_conn = _conn_for(_resolve_db_name("engagement_flags"))
+
+    try:
+        result = update_engagement_flags(
+            write_conn,
+            write_conn=write_conn,
+            nihtables_conn=nihtables_conn,
+            research_networks_conn=resnet_conn,
+            study_lookup_table_conn=study_lookup_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_alldata():
+    # pi_emails/progress_tracker: external, always DB_NAME. mysql_merged:
+    # ALWAYS tempspace. reporter_dqaudit/study_lookup_table/
+    # engagement_flags/research_networks/alldata (the write target) follow
+    # DB_ENVIRONMENT.
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    engagement_flags_conn = _conn_for(_resolve_db_name("engagement_flags"))
+    research_networks_conn = _conn_for(_resolve_db_name("research_networks"))
+    write_conn = _conn_for(_resolve_db_name("alldata"))
+
+    try:
+        result = update_alldata(
+            conn,
+            write_conn=write_conn,
+            mysql_merged_conn=mysql_merged_conn,
+            reporter_dqaudit_conn=reporter_dqaudit_conn,
+            study_lookup_table_conn=study_lookup_conn,
+            engagement_flags_conn=engagement_flags_conn,
+            research_networks_conn=research_networks_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_qc_report():
+    # progress_tracker: external, always DB_NAME. nihtables/mysql_merged:
+    # ALWAYS tempspace. study_lookup_table follows DB_ENVIRONMENT. Writes
+    # no MySQL table -- a styled .xlsx report to S3 only.
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    nihtables_conn = _conn_for(TEMPSPACE_DB_NAME)
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{REPORTS_PREFIX}")
+
+    try:
+        result = update_qc_report(
+            conn,
+            ref_source,
+            nihtables_conn=nihtables_conn,
+            mysql_merged_conn=mysql_merged_conn,
+            study_lookup_table_conn=study_lookup_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_gtd_targets():
+    # alldata follows DB_ENVIRONMENT like every other table this lambda
+    # builds. Writes no MySQL table -- a two-sheet .xlsx report to S3 only.
+    alldata_conn = connect_mysql(database=_resolve_db_name("alldata"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{REPORTS_PREFIX}")
+
+    try:
+        result = update_gtd_targets(alldata_conn, ref_source)
+    finally:
+        alldata_conn.close()
+    return result
+
+
+def _run_study_metrics():
+    # mysql_merged: ALWAYS tempspace. study_lookup_table follows
+    # DB_ENVIRONMENT. Writes no MySQL table -- fills a hand-maintained
+    # template .xlsx (manual input, like research_networks' workbook) and
+    # writes the result to S3 as a report.
+    mysql_merged_conn = connect_mysql(database=TEMPSPACE_DB_NAME)
+    study_lookup_conn = connect_mysql(database=_resolve_db_name("study_lookup_table"))
+    manual_inputs_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+    report_source = S3ExcelSource(f"s3://{S3_BUCKET}/{REPORTS_PREFIX}")
+
+    try:
+        result = update_study_metrics(
+            mysql_merged_conn, study_lookup_conn, manual_inputs_source, report_source,
+        )
+    finally:
+        mysql_merged_conn.close()
+        study_lookup_conn.close()
+    return result
 
 
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
-    "study_summary":          _run_study_summary,
+    "research_networks":     _run_research_networks,          # must run before study_summary
+    "mysql_merge":            _run_mysql_merge,                # must run after reporter + research_networks
+    "reporter_dqaudit":       _run_reporter_dqaudit,           # must run after mysql_merge + research_networks + heal_awards_reporter_sn
+    "study_manual_match_candidates": _run_study_manual_match_candidates,  # must run after mysql_merge + reporter_dqaudit; must run immediately before study_lookup_table
+    "study_lookup_table":     _run_study_lookup_table,         # must run after mysql_merge + reporter_dqaudit + study_manual_match_candidates
+    "engagement_flags":       _run_engagement_flags,           # must run after mysql_merge + research_networks + study_lookup_table
+    "alldata":                _run_alldata,                    # must run after mysql_merge + reporter_dqaudit + study_lookup_table + engagement_flags + research_networks
+    "study_summary":          _run_study_summary,              # must run after reporter_dqaudit + engagement_flags (+ study_lookup_table, once finalized)
+    "qc_report":              _run_qc_report,                  # must run after mysql_merge + study_lookup_table; writes a report, no MySQL table
+    "gtd_targets":            _run_gtd_targets,                # must run after alldata; writes a report, no MySQL table
+    "study_metrics":          _run_study_metrics,              # must run after mysql_merge + study_lookup_table; writes a report, no MySQL table
     # Future tables — add entries here, e.g.:
-    # "engagement_flags": _run_engagement_flags,
     # "awards":           _run_awards,
 }
+
+# Nothing is excluded from "all" anymore. study_manual_match_candidates'
+# own generate_match_candidates() is designed to be safely re-run on every
+# invocation -- it absorbs whatever decisions a human has already
+# uploaded into the pending file, archives that pending file (timestamped),
+# and writes a fresh one containing only whatever's still genuinely
+# undecided. Its own result dict (pending_rows/newly_decided/ledger_rows)
+# already flows through the generic per-table Slack notification below, so
+# "there's a new list of matches needing review" surfaces there -- no
+# separate alerting needed. study_lookup_table's own finalize step then
+# leaves anything not yet in the ledger as an unresolved duplicate row
+# rather than blocking, so running it with a partially-reviewed ledger is
+# safe; the next "all" run (after a human uploads more decisions) just
+# finalizes a little more of it. One side effect: this means a timestamped
+# pending-file archive gets written to S3 on every "all" run, not only
+# when something actually changed -- harmless, just a bit more S3 noise.
+_EXCLUDED_FROM_ALL = set()
+
+# Explicit execution order for {"table": "all"} -- NOT derived from
+# TABLE_REGISTRY's own key order. Python dicts preserve insertion order, so
+# TABLE_REGISTRY's keys happen to already match this sequence today, but
+# relying on that is fragile: reordering TABLE_REGISTRY for readability, or
+# inserting a new entry above an existing one, would silently change "all"'s
+# execution order with no visible signal. This list is the one place that
+# order is an intentional, reviewable fact, not an accident of dict layout.
+#
+# Dependency chain (why this order):
+#   reporter                      -- no dependencies
+#   heal_awards_reporter_sn       -- after reporter
+#   research_networks             -- no dependencies; must run before mysql_merge/study_summary
+#   mysql_merge                    -- after reporter + research_networks
+#   reporter_dqaudit                -- after mysql_merge + research_networks + heal_awards_reporter_sn
+#   study_manual_match_candidates    -- after mysql_merge + reporter_dqaudit; must run immediately
+#                                        before study_lookup_table (advances the ledger it reads)
+#   study_lookup_table                -- after mysql_merge + reporter_dqaudit + study_manual_match_candidates
+#   engagement_flags                   -- after mysql_merge + research_networks + study_lookup_table
+#   alldata                             -- after mysql_merge + reporter_dqaudit + study_lookup_table
+#                                          + engagement_flags + research_networks
+#   study_summary                        -- after reporter_dqaudit + engagement_flags + study_lookup_table
+#   qc_report                             -- after mysql_merge + study_lookup_table; report only, no MySQL table
+#   gtd_targets                            -- after alldata; report only, no MySQL table
+#   study_metrics                           -- after mysql_merge + study_lookup_table; report only, no MySQL table
+_ALL_TABLES = [
+    "reporter",
+    "heal_awards_reporter_sn",
+    "research_networks",
+    "mysql_merge",
+    "reporter_dqaudit",
+    "study_manual_match_candidates",
+    "study_lookup_table",
+    "engagement_flags",
+    "alldata",
+    "study_summary",
+    "qc_report",
+    "gtd_targets",
+    "study_metrics",
+]
+
+# Safety net: if a table is ever added to TABLE_REGISTRY (or excluded from
+# "all") without updating the explicit order above, fail loudly at import
+# time rather than silently skipping it on every "all" run.
+_expected_all = set(TABLE_REGISTRY) - _EXCLUDED_FROM_ALL
+if set(_ALL_TABLES) != _expected_all:
+    _missing = _expected_all - set(_ALL_TABLES)
+    _extra = set(_ALL_TABLES) - _expected_all
+    raise RuntimeError(
+        f"_ALL_TABLES is out of sync with TABLE_REGISTRY: missing={_missing or None} extra={_extra or None}"
+    )
 
 # Registry key -> (env var controlling the real table name, default table name).
 # Mirrors the resolution each table module does internally — kept here too so
 # Slack notifications can show the real table name even on failure, before
 # the table function itself ever gets a chance to resolve/return it.
+#
+# mysql_merge produces two tables, not one -- it isn't in this dict at all,
+# since its own result dict already carries both real table names directly
+# (nihtables_table/mysql_merged_table), and _resolve_table_name()'s fallback
+# (the bare registry key) is only used for the Slack "starting" log line,
+# not anything that needs to be precise ahead of time.
 _TABLE_NAME_ENV = {
-    "reporter":               ("REPORTER_TABLE_NAME", "reporter_test"),
-    "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn_test"),
-    "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary_test"),
+    "reporter":               ("REPORTER_TABLE_NAME", "reporter"),
+    "heal_awards_reporter_sn": ("HEAL_AWARDS_REPORTER_SN_TABLE_NAME", "heal_awards_reporter_sn"),
+    "research_networks":     ("RESEARCH_NETWORKS_TABLE_NAME", "research_networks"),
+    "reporter_dqaudit":       ("REPORTER_DQAUDIT_TABLE_NAME", "reporter_dqaudit"),
+    "study_lookup_table":     ("STUDY_LOOKUP_TABLE_NAME", "study_lookup_table"),
+    "engagement_flags":       ("ENGAGEMENT_FLAGS_TABLE_NAME", "engagement_flags"),
+    "alldata":                ("ALLDATA_TABLE_NAME", "alldata"),
+    "study_summary":          ("STUDY_SUMMARY_TABLE_NAME", "study_summary"),
 }
 
 
@@ -121,7 +613,7 @@ def lambda_handler(event, context):
     logger.info("Invoked with table=%s", table)
 
     if table == "all":
-        tables_to_run = list(TABLE_REGISTRY.keys())
+        tables_to_run = _ALL_TABLES
     elif table in TABLE_REGISTRY:
         tables_to_run = [table]
     else:

@@ -61,24 +61,31 @@ def _build_sql_dtype_map(dd_path: str) -> dict | None:
     return dtype_map
 
 
-def update_reporter(engine, target_table: str | None = None) -> dict:
+def update_reporter(engine, read_engine=None, target_table: str | None = None) -> dict:
     """
     Refresh the reporter MySQL table.
 
     Args:
-        engine:         SQLAlchemy engine (from db.create_alchemy_engine()).
+        engine:         SQLAlchemy engine to read/write the reporter table
+                        itself (from db.create_alchemy_engine()).
+        read_engine:    Engine for reading `awards` (an external input, not
+                        built by this lambda -- may live in a different
+                        database than the reporter table in test mode).
+                        Defaults to `engine` if not given, so existing
+                        single-engine callers are unaffected.
         target_table:   Table name to write; defaults to TABLE_NAME env var or 'reporter'.
 
     Returns:
         dict with keys: table, rows_written, added, removed
     """
+    read_engine = read_engine or engine
     if target_table is None:
-        target_table = os.getenv("REPORTER_TABLE_NAME", "reporter_test")
+        target_table = os.getenv("REPORTER_TABLE_NAME", "reporter")
     dd_path = os.getenv("REPORTER_DD_PATH", _DEFAULT_DD)
     run_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     # Collect appl_ids: union of awards table and existing reporter rows
-    awards_db = pd.read_sql_table("awards", con=engine)
+    awards_db = pd.read_sql_table("awards", con=read_engine)
     awards_db["appl_id"] = awards_db["appl_id"].astype(str)
     logger.info("Read %d rows from awards", len(awards_db))
 
