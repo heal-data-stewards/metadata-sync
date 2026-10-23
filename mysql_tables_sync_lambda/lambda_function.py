@@ -368,7 +368,8 @@ def _run_engagement_flags():
 def _run_alldata():
     # pi_emails/progress_tracker: external, always DB_NAME. mysql_merged:
     # ALWAYS tempspace. reporter_dqaudit/study_lookup_table/
-    # engagement_flags/alldata (the write target) follow DB_ENVIRONMENT.
+    # engagement_flags/research_networks/alldata (the write target) follow
+    # DB_ENVIRONMENT.
     db_name = os.getenv("DB_NAME")
     open_conns = {}
 
@@ -382,6 +383,7 @@ def _run_alldata():
     reporter_dqaudit_conn = _conn_for(_resolve_db_name("reporter_dqaudit"))
     study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
     engagement_flags_conn = _conn_for(_resolve_db_name("engagement_flags"))
+    research_networks_conn = _conn_for(_resolve_db_name("research_networks"))
     write_conn = _conn_for(_resolve_db_name("alldata"))
 
     try:
@@ -392,6 +394,7 @@ def _run_alldata():
             reporter_dqaudit_conn=reporter_dqaudit_conn,
             study_lookup_table_conn=study_lookup_conn,
             engagement_flags_conn=engagement_flags_conn,
+            research_networks_conn=research_networks_conn,
         )
     finally:
         for c in open_conns.values():
@@ -408,7 +411,7 @@ TABLE_REGISTRY = {
     "study_manual_match_candidates": _run_study_manual_match_candidates,  # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
     "study_lookup_table":     _run_study_lookup_table,         # must run after mysql_merge + reporter_dqaudit; not part of "all" (see note below)
     "engagement_flags":       _run_engagement_flags,           # must run after mysql_merge + research_networks + study_lookup_table
-    "alldata":                _run_alldata,                    # must run after mysql_merge + reporter_dqaudit + study_lookup_table + engagement_flags
+    "alldata":                _run_alldata,                    # must run after mysql_merge + reporter_dqaudit + study_lookup_table + engagement_flags + research_networks
     "study_summary":          _run_study_summary,              # must run after reporter_dqaudit + engagement_flags (+ study_lookup_table, once finalized)
     # Future tables — add entries here, e.g.:
     # "awards":           _run_awards,

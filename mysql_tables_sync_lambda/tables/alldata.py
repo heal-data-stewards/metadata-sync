@@ -8,18 +8,31 @@ Mirrors mysql_code/python_scripts/HEAL_06_CompilebyStudy.py, whose own
 notes describe this output as "analogous, but not identical" to the data
 extract manually prepared for the Monday Studies Board.
 
-All six inputs are either built by this lambda already (mysql_merged,
+All seven inputs are either built by this lambda already (mysql_merged,
 reporter_dqaudit, study_lookup_table, engagement_flags) or pre-existing
-real MySQL tables (pi_emails, progress_tracker) -- nothing external, no
-manual input.
+real MySQL tables (pi_emails, progress_tracker, research_networks) --
+nothing external, no manual input.
 
 Dropped vs. the original script: every Stata-style column reorder and
 row sort (moving study_hdp_status after study_hdp_id, sorting by
 xstudy_id/fisc_yr) -- same call as mysql_merge.py/study_lookup_table.py,
 since none of it affects a MySQL table's actual content. The
-pi_emails_key.csv/res_net_key.csv/livearchkey.csv/xalldata_*.csv
-intermediate writes are dropped too -- internal staging frames, never
-read back by anything outside this one script.
+livearchkey.csv/xalldata_*.csv intermediate writes are dropped too --
+internal staging frames, never read back by anything outside this one
+script.
+
+The original script's own pi_emails_key/res_net_key derivations are also
+dropped, in favor of reusing tables/study_summary.py's _build_pi_emails/
+_build_resnet directly: study_summary.py already computes the exact same
+study-level PI-email/research-network values, and a side-by-side check of
+the two independent implementations found each one had fixed a real edge
+case the other hadn't (study_summary's version safely resolves an
+ambiguous multi-email study to no email, where the original alldata logic
+could silently produce duplicate rows per study; alldata's version
+filtered "NULL"/"None" string sentinels and guaranteed one row per study,
+where study_summary's didn't). Rather than keep two independently-drifting
+copies, _build_resnet was updated in study_summary.py to pick up alldata's
+two fixes, and both modules now share the one function.
 """
 
 import logging
@@ -29,6 +42,7 @@ import re
 import pandas as pd
 
 from db import clean_mysql_value, format_mysql_write_value
+from tables.study_summary import _build_pi_emails, _build_resnet
 
 logger = logging.getLogger(__name__)
 
@@ -82,41 +96,6 @@ def _write_table(conn, df: pd.DataFrame, table: str) -> None:
 # Build logic
 # ---------------------------------------------------------------------------
 
-def _build_pi_emails_key(alldata: pd.DataFrame) -> pd.DataFrame:
-    pi_df = alldata.dropna(subset=["pi_email"]).copy()
-    pi_df = pi_df[pi_df["pi_email"] != ""]
-
-    # Assign the study's email from its most-recent appl_id first.
-    pi_df["study_pi_email"] = ""
-    mask_recent = pi_df["appl_id"] == pi_df["study_most_recent_appl"]
-    pi_df.loc[mask_recent, "study_pi_email"] = pi_df["pi_email"]
-
-    # A study with only one row gets that row's email even if it isn't
-    # (for whatever reason) flagged as the most-recent appl_id.
-    pi_df["num_rows"] = pi_df.groupby("xstudy_id")["xstudy_id"].transform("count")
-    mask_single = (pi_df["study_pi_email"] == "") & (pi_df["num_rows"] == 1)
-    pi_df.loc[mask_single, "study_pi_email"] = pi_df["pi_email"]
-
-    pi_df["xstudy_has_email"] = ((pi_df["study_pi_email"] != "") & (pi_df["study_pi_email"].notna())).astype(int)
-    pi_df["indic"] = pi_df.groupby("xstudy_id")["xstudy_has_email"].transform("max")
-    pi_df = pi_df[~((pi_df["indic"] == 1) & (pi_df["xstudy_has_email"] == 0))]
-
-    pi_df.loc[pi_df["study_pi_email"] == "", "study_pi_email"] = pi_df["pi_email"]
-    return pi_df[["xstudy_id", "study_pi_email"]].drop_duplicates()
-
-
-def _build_res_net_key(alldata: pd.DataFrame) -> pd.DataFrame:
-    # "NULL"/"None" strings come through from upstream MySQL reads and
-    # must be filtered explicitly, same as a genuinely blank/missing value.
-    res_df = alldata[~alldata["res_net"].astype(str).str.strip().isin(["", "nan", "NULL", "None"])].copy()
-    return (
-        res_df[["xstudy_id", "res_net"]]
-        .drop_duplicates()
-        .rename(columns={"res_net": "study_res_net"})
-        .drop_duplicates(subset="xstudy_id")
-    )
-
-
 def build_alldata(
     mysql_merged_df: pd.DataFrame,
     reporter_dqaudit_df: pd.DataFrame,
@@ -124,6 +103,7 @@ def build_alldata(
     engagement_flags_df: pd.DataFrame,
     pi_emails_df: pd.DataFrame,
     progress_tracker_df: pd.DataFrame,
+    research_networks_df: pd.DataFrame,
 ) -> pd.DataFrame:
     # --- 1. Merge source data ---
     xalldata = pd.concat([mysql_merged_df, reporter_dqaudit_df], ignore_index=True, sort=False)
@@ -154,8 +134,14 @@ def build_alldata(
     logger.info("alldata (post source merges): %d rows", len(alldata))
 
     # --- 2. Derive study-level values ---
-    pi_emails_key = _build_pi_emails_key(alldata)
-    res_net_key = _build_res_net_key(alldata)
+    # PI email and research network are shared with study_summary.py's own
+    # study-level derivations (tables/study_summary.py's _build_pi_emails/
+    # _build_resnet) -- same logic, not a second, divergent copy of it.
+    # Both are keyed by study_most_recent_appl, matching study_lookup_df's
+    # own convention (alldata has no independent notion of "the" study key
+    # beyond what study_lookup_table already assigns).
+    pi_emails_key = _build_pi_emails(study_lookup_df, pi_emails_df).rename(columns={"pi_email": "study_pi_email"})
+    res_net_key = _build_resnet(study_lookup_df, research_networks_df).rename(columns={"res_net": "study_res_net"})
     live_arch_key = (
         progress_tracker_df[["hdp_id", "archived"]]
         .rename(columns={"hdp_id": "study_hdp_id", "archived": "study_hdp_status"})
@@ -163,8 +149,8 @@ def build_alldata(
 
     # --- 3. Merge derived values ---
     final_df = alldata.copy()
-    final_df = pd.merge(final_df, pi_emails_key, on="xstudy_id", how="left")
-    final_df = pd.merge(final_df, res_net_key, on="xstudy_id", how="left")
+    final_df = pd.merge(final_df, pi_emails_key, on="study_most_recent_appl", how="left")
+    final_df = pd.merge(final_df, res_net_key, on="study_most_recent_appl", how="left")
     final_df = pd.merge(final_df, live_arch_key, on="study_hdp_id", how="left", indicator=True)
     final_df = final_df[final_df["_merge"] != "right_only"].drop(columns=["_merge"])
 
@@ -188,6 +174,7 @@ def update_alldata(
     reporter_dqaudit_conn=None,
     study_lookup_table_conn=None,
     engagement_flags_conn=None,
+    research_networks_conn=None,
     target_table: str | None = None,
 ) -> dict:
     """
@@ -197,15 +184,17 @@ def update_alldata(
     mysql_merged_conn: connection for reading `mysql_merged` -- ALWAYS
           tempspace regardless of DB_ENVIRONMENT. Defaults to `conn`, but
           callers should normally pass a tempspace-specific connection.
-    reporter_dqaudit_conn / study_lookup_table_conn / engagement_flags_conn:
-          connections for reading those three tables, which (like alldata
-          itself) follow DB_ENVIRONMENT. Default to `conn` if not given.
+    reporter_dqaudit_conn / study_lookup_table_conn / engagement_flags_conn /
+    research_networks_conn: connections for reading those four tables,
+          which (like alldata itself) follow DB_ENVIRONMENT. Default to
+          `conn` if not given.
     """
     write_conn = write_conn or conn
     mysql_merged_conn = mysql_merged_conn or conn
     reporter_dqaudit_conn = reporter_dqaudit_conn or conn
     study_lookup_table_conn = study_lookup_table_conn or conn
     engagement_flags_conn = engagement_flags_conn or conn
+    research_networks_conn = research_networks_conn or conn
 
     if target_table is None:
         target_table = os.getenv("ALLDATA_TABLE_NAME", ALLDATA_TABLE)
@@ -214,6 +203,7 @@ def update_alldata(
     reporter_dqaudit_table = os.getenv("REPORTER_DQAUDIT_TABLE_NAME", "reporter_dqaudit")
     study_lookup_table_name = os.getenv("STUDY_LOOKUP_TABLE_NAME", "study_lookup_table")
     engagement_flags_table = os.getenv("ENGAGEMENT_FLAGS_TABLE_NAME", "engagement_flags")
+    research_networks_table = os.getenv("RESEARCH_NETWORKS_TABLE_NAME", "research_networks")
 
     mysql_merged_df = _read_table(mysql_merged_conn, mysql_merged_table)
     reporter_dqaudit_df = _read_table(reporter_dqaudit_conn, reporter_dqaudit_table)
@@ -221,10 +211,12 @@ def update_alldata(
     engagement_flags_df = _read_table(engagement_flags_conn, engagement_flags_table)
     pi_emails_df = _read_table(conn, "pi_emails")
     progress_tracker_df = _read_table(conn, "progress_tracker")
+    research_networks_df = _read_table(research_networks_conn, research_networks_table)
 
     df = build_alldata(
         mysql_merged_df, reporter_dqaudit_df, study_lookup_df,
         engagement_flags_df, pi_emails_df, progress_tracker_df,
+        research_networks_df,
     )
     _write_table(write_conn, df, target_table)
 

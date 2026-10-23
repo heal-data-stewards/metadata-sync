@@ -136,6 +136,14 @@ def _create_subset(df: pd.DataFrame, extra_fields: list, rename_dict: dict) -> p
 
 
 def _build_pi_emails(gt_file: pd.DataFrame, pi_emails_df: pd.DataFrame) -> pd.DataFrame:
+    """Study-level PI email, one row per study_most_recent_appl.
+
+    Shared with tables/alldata.py. If 2+ appl_ids in a study have
+    different non-blank emails and none of them is the study's
+    most-recent appl_id, this deliberately resolves to no email for that
+    study (ambiguous) rather than picking one arbitrarily or letting a
+    later merge multiply rows.
+    """
     appl_ids = gt_file[["appl_id", "study_most_recent_appl"]].drop_duplicates()
     merged = pd.merge(appl_ids, pi_emails_df, how="left", on="appl_id")
     merged["pi_email"] = merged["pi_email"].fillna("")
@@ -164,10 +172,26 @@ def _build_pi_emails(gt_file: pd.DataFrame, pi_emails_df: pd.DataFrame) -> pd.Da
 
 
 def _build_resnet(gt_file: pd.DataFrame, resnet_df: pd.DataFrame) -> pd.DataFrame:
+    """Study-level research network, one row per study_most_recent_appl.
+
+    Shared with tables/alldata.py (its own per-award res_net stays
+    separate -- this is specifically the study-level derived value).
+    "NULL"/"None"/"nan" string sentinels (left over from the Stata/CSV-era
+    pipeline) are treated the same as a real missing value. Guarantees
+    exactly one row per study even if two appl_ids in it genuinely carry
+    different non-blank res_net values -- picks the first one found,
+    rather than letting a later merge on study_most_recent_appl silently
+    multiply rows.
+    """
     appl_ids = gt_file[["appl_id", "study_most_recent_appl"]].drop_duplicates()
-    added    = pd.merge(appl_ids, resnet_df[["appl_id", "res_net"]], how="left", on="appl_id")
-    has_net  = added[~pd.isna(added["res_net"])][["study_most_recent_appl", "res_net"]]
-    updated  = pd.merge(appl_ids, has_net, how="left", on="study_most_recent_appl")
+    added = pd.merge(appl_ids, resnet_df[["appl_id", "res_net"]], how="left", on="appl_id")
+
+    res_net_str = added["res_net"].astype(str).str.strip()
+    is_real = added["res_net"].notna() & ~res_net_str.isin(["", "nan", "NULL", "None"])
+    has_net = added[is_real][["study_most_recent_appl", "res_net"]].drop_duplicates()
+    has_net = has_net.drop_duplicates(subset="study_most_recent_appl", keep="first")
+
+    updated = pd.merge(appl_ids, has_net, how="left", on="study_most_recent_appl")
     return updated[["study_most_recent_appl", "res_net"]].drop_duplicates()
 
 
