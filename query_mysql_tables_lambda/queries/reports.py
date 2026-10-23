@@ -96,10 +96,25 @@ def get_download_url(conn, report=None, expires_in=_DEFAULT_EXPIRES_IN, **kwargs
     try:
         head = client.head_object(Bucket=S3_BUCKET, Key=key)
     except ClientError as e:
+        status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if status == 403:
+            # S3 returns 403 (not 404) for a missing key when the caller
+            # lacks s3:ListBucket/s3:GetObject -- this almost always means
+            # an IAM permissions gap, not a genuinely missing report, so
+            # don't tell the caller "has it ever been generated?" here.
+            hint = (
+                f"Access denied checking s3://{S3_BUCKET}/{key} -- this Lambda's "
+                f"execution role likely needs s3:GetObject (and s3:ListBucket) on "
+                f"arn:aws:s3:::{S3_BUCKET}/{REPORTS_PREFIX}/* (or the report "
+                f"genuinely doesn't exist and ListBucket would be needed to tell "
+                f"the two apart)."
+            )
+        else:
+            hint = f"Report not found at s3://{S3_BUCKET}/{key} -- has it ever been generated?"
         return {
             "query": "get_download_url",
             "report": report,
-            "error": f"Report not found at s3://{S3_BUCKET}/{key} -- has it ever been generated? ({e})",
+            "error": f"{hint} ({e})",
         }
 
     url = client.generate_presigned_url(
