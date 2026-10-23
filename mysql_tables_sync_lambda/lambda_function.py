@@ -41,6 +41,8 @@ Include these files alongside lambda_function.py when deploying:
   - tables/study_lookup_table.py
   - tables/engagement_flags.py
   - tables/alldata.py
+  - tables/qc_report.py
+  - tables/gtd_targets.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
 
@@ -86,6 +88,8 @@ from tables.reporter_dqaudit import update_reporter_dqaudit
 from tables.study_lookup_table import generate_match_candidates, update_study_lookup_table
 from tables.engagement_flags import update_engagement_flags
 from tables.alldata import update_alldata
+from tables.qc_report import update_qc_report
+from tables.gtd_targets import update_gtd_targets
 
 load_dotenv()
 
@@ -97,6 +101,10 @@ logger = logging.getLogger(__name__)
 # package_board_lambda/monday_package_board_lambda's inputs.
 S3_BUCKET = os.getenv("S3_BUCKET", "heal-dashboard-snapshots")
 MANUAL_INPUTS_PREFIX = os.getenv("MANUAL_INPUTS_PREFIX", "mysql_tables_sync/inputs")
+
+# Generated report files (QC report, GTD targets) are outputs, not manual
+# inputs -- they live in their own sibling prefix, not MANUAL_INPUTS_PREFIX.
+REPORTS_PREFIX = os.getenv("REPORTS_PREFIX", "mysql_tables_sync/reports")
 
 # ---------------------------------------------------------------------------
 # tempspace/healstudies database routing -- one shared mechanism, not a
@@ -402,6 +410,51 @@ def _run_alldata():
     return result
 
 
+def _run_qc_report():
+    # progress_tracker: external, always DB_NAME. nihtables/mysql_merged:
+    # ALWAYS tempspace. study_lookup_table follows DB_ENVIRONMENT. Writes
+    # no MySQL table -- a styled .xlsx report to S3 only.
+    db_name = os.getenv("DB_NAME")
+    open_conns = {}
+
+    def _conn_for(database):
+        if database not in open_conns:
+            open_conns[database] = connect_mysql() if database == db_name else connect_mysql(database=database)
+        return open_conns[database]
+
+    conn = _conn_for(db_name)
+    nihtables_conn = _conn_for(TEMPSPACE_DB_NAME)
+    mysql_merged_conn = _conn_for(TEMPSPACE_DB_NAME)
+    study_lookup_conn = _conn_for(_resolve_db_name("study_lookup_table"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{REPORTS_PREFIX}")
+
+    try:
+        result = update_qc_report(
+            conn,
+            ref_source,
+            nihtables_conn=nihtables_conn,
+            mysql_merged_conn=mysql_merged_conn,
+            study_lookup_table_conn=study_lookup_conn,
+        )
+    finally:
+        for c in open_conns.values():
+            c.close()
+    return result
+
+
+def _run_gtd_targets():
+    # alldata follows DB_ENVIRONMENT like every other table this lambda
+    # builds. Writes no MySQL table -- a two-sheet .xlsx report to S3 only.
+    alldata_conn = connect_mysql(database=_resolve_db_name("alldata"))
+    ref_source = S3ExcelSource(f"s3://{S3_BUCKET}/{REPORTS_PREFIX}")
+
+    try:
+        result = update_gtd_targets(alldata_conn, ref_source)
+    finally:
+        alldata_conn.close()
+    return result
+
+
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
@@ -413,6 +466,8 @@ TABLE_REGISTRY = {
     "engagement_flags":       _run_engagement_flags,           # must run after mysql_merge + research_networks + study_lookup_table
     "alldata":                _run_alldata,                    # must run after mysql_merge + reporter_dqaudit + study_lookup_table + engagement_flags + research_networks
     "study_summary":          _run_study_summary,              # must run after reporter_dqaudit + engagement_flags (+ study_lookup_table, once finalized)
+    "qc_report":              _run_qc_report,                  # must run after mysql_merge + study_lookup_table; writes a report, no MySQL table
+    "gtd_targets":            _run_gtd_targets,                # must run after alldata; writes a report, no MySQL table
     # Future tables — add entries here, e.g.:
     # "awards":           _run_awards,
 }

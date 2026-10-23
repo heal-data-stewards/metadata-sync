@@ -20,6 +20,7 @@ class FileSource(Protocol):
     def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame: ...
     def read_csv(self, name: str, **kwargs) -> pd.DataFrame: ...
     def write_csv(self, name: str, df: pd.DataFrame) -> None: ...
+    def write_bytes(self, name: str, data: bytes) -> None: ...
 
 
 class S3ExcelSource:
@@ -54,6 +55,9 @@ class S3ExcelSource:
         df.to_csv(buf, index=False)
         self.client.put_object(Bucket=self.bucket, Key=self._key(name), Body=buf.getvalue().encode("utf-8"))
 
+    def write_bytes(self, name: str, data: bytes) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=self._key(name), Body=data)
+
 
 class LocalExcelSource:
     """Reads Excel/CSV files from a local directory. Used for local runs and tests."""
@@ -76,3 +80,10 @@ class LocalExcelSource:
         path = self._path(name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         df.to_csv(path, index=False)
+
+    def write_bytes(self, name: str, data: bytes) -> None:
+        import os
+        path = self._path(name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
