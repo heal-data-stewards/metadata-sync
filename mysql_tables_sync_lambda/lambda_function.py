@@ -496,11 +496,59 @@ TABLE_REGISTRY = {
 }
 
 # study_manual_match_candidates and study_lookup_table are both registered
-# above but deliberately excluded from "all" (see _ALL_TABLES below):
-# finalizing study_lookup_table reshuffles every xstudy_id in it, which
-# should happen when a human decides to run it -- after reviewing whatever
-# the candidates step surfaced -- not silently on every scheduled sync.
-_ALL_TABLES = [k for k in TABLE_REGISTRY if k not in ("study_manual_match_candidates", "study_lookup_table")]
+# above but deliberately excluded from "all": finalizing study_lookup_table
+# reshuffles every xstudy_id in it, which should happen when a human
+# decides to run it -- after reviewing whatever the candidates step
+# surfaced -- not silently on every scheduled sync.
+_EXCLUDED_FROM_ALL = {"study_manual_match_candidates", "study_lookup_table"}
+
+# Explicit execution order for {"table": "all"} -- NOT derived from
+# TABLE_REGISTRY's own key order. Python dicts preserve insertion order, so
+# TABLE_REGISTRY's keys happen to already match this sequence today, but
+# relying on that is fragile: reordering TABLE_REGISTRY for readability, or
+# inserting a new entry above an existing one, would silently change "all"'s
+# execution order with no visible signal. This list is the one place that
+# order is an intentional, reviewable fact, not an accident of dict layout.
+#
+# Dependency chain (why this order):
+#   reporter                  -- no dependencies
+#   heal_awards_reporter_sn   -- after reporter
+#   research_networks         -- no dependencies; must run before mysql_merge/study_summary
+#   mysql_merge                -- after reporter + research_networks
+#   reporter_dqaudit            -- after mysql_merge + research_networks + heal_awards_reporter_sn
+#   engagement_flags             -- after mysql_merge + research_networks + study_lookup_table
+#                                   (study_lookup_table is excluded from "all" -- see above --
+#                                    so this reads whatever copy already exists in MySQL)
+#   alldata                       -- after mysql_merge + reporter_dqaudit + study_lookup_table
+#                                     + engagement_flags + research_networks
+#   study_summary                  -- after reporter_dqaudit + engagement_flags (+ study_lookup_table)
+#   qc_report                       -- after mysql_merge + study_lookup_table; report only, no MySQL table
+#   gtd_targets                      -- after alldata; report only, no MySQL table
+#   study_metrics                    -- after mysql_merge + study_lookup_table; report only, no MySQL table
+_ALL_TABLES = [
+    "reporter",
+    "heal_awards_reporter_sn",
+    "research_networks",
+    "mysql_merge",
+    "reporter_dqaudit",
+    "engagement_flags",
+    "alldata",
+    "study_summary",
+    "qc_report",
+    "gtd_targets",
+    "study_metrics",
+]
+
+# Safety net: if a table is ever added to TABLE_REGISTRY (or excluded from
+# "all") without updating the explicit order above, fail loudly at import
+# time rather than silently skipping it on every "all" run.
+_expected_all = set(TABLE_REGISTRY) - _EXCLUDED_FROM_ALL
+if set(_ALL_TABLES) != _expected_all:
+    _missing = _expected_all - set(_ALL_TABLES)
+    _extra = set(_ALL_TABLES) - _expected_all
+    raise RuntimeError(
+        f"_ALL_TABLES is out of sync with TABLE_REGISTRY: missing={_missing or None} extra={_extra or None}"
+    )
 
 # Registry key -> (env var controlling the real table name, default table name).
 # Mirrors the resolution each table module does internally — kept here too so
