@@ -104,10 +104,16 @@ def build_study_metrics(
     ws["C2"] = run_date
 
     # --- 1. Number of HEAL Studies ---
+    # The breakdown table only has 3 buckets (Study/CTN/Other, matching the
+    # Stata original's "3 Stewards-defined entity types"), but entity_type
+    # itself now has more values than that (Intramural/Contract/ICPSR/PSPP
+    # in addition to Study/CTN/Other) -- fold everything that isn't
+    # Study/CTN into "Other" so C9+C10+C11 always equals C5, regardless of
+    # what other entity_type values exist now or get added later.
     ws["C5"] = len(metrics)
     ws["C9"] = int((metrics["entity_type"] == "Study").sum())
     ws["C10"] = int((metrics["entity_type"] == "CTN").sum())
-    ws["C11"] = int((metrics["entity_type"] == "Other").sum())
+    ws["C11"] = int((~metrics["entity_type"].isin(["Study", "CTN"])).sum())
 
     # --- 2. Number of studies registered ---
     ws["C18"] = int((metrics["is_registered"] == "registered").sum())
@@ -182,9 +188,11 @@ def build_study_metrics(
     awards_base = mysql_merged_df[mysql_merged_df["merge_awards_mds"] != "In MDS only"]
     awards = awards_base[awards_base["appl_id"] != ""][["appl_id", "entity_type"]].drop_duplicates(subset="appl_id")
     ws["C80"] = len(awards)
+    # Same Study/CTN/Other folding as the C9-C11 breakdown above, for the
+    # same reason -- C83+C84+C85 should always equal C80.
     ws["C83"] = int((awards["entity_type"] == "Study").sum())
     ws["C84"] = int((awards["entity_type"] == "CTN").sum())
-    ws["C85"] = int((awards["entity_type"] == "Other").sum())
+    ws["C85"] = int((~awards["entity_type"].isin(["Study", "CTN"])).sum())
 
     # --- Drill-down sheets, for manual QC of the numbers above ---
     mysql_drill = mysql_merged_df.drop(columns=["proj_abs"], errors="ignore")
