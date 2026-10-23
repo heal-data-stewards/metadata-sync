@@ -19,6 +19,7 @@ import pandas as pd
 class FileSource(Protocol):
     def read_excel(self, name: str, sheet_name: str | int = 0) -> pd.DataFrame: ...
     def read_csv(self, name: str, **kwargs) -> pd.DataFrame: ...
+    def read_bytes(self, name: str) -> bytes: ...
     def write_csv(self, name: str, df: pd.DataFrame) -> None: ...
     def write_bytes(self, name: str, data: bytes) -> None: ...
 
@@ -50,6 +51,9 @@ class S3ExcelSource:
     def read_csv(self, name: str, **kwargs) -> pd.DataFrame:
         return pd.read_csv(io.BytesIO(self._get(name)), **kwargs)
 
+    def read_bytes(self, name: str) -> bytes:
+        return self._get(name)
+
     def write_csv(self, name: str, df: pd.DataFrame) -> None:
         buf = io.StringIO()
         df.to_csv(buf, index=False)
@@ -74,6 +78,10 @@ class LocalExcelSource:
 
     def read_csv(self, name: str, **kwargs) -> pd.DataFrame:
         return pd.read_csv(self._path(name), **kwargs)
+
+    def read_bytes(self, name: str) -> bytes:
+        with open(self._path(name), "rb") as f:
+            return f.read()
 
     def write_csv(self, name: str, df: pd.DataFrame) -> None:
         import os

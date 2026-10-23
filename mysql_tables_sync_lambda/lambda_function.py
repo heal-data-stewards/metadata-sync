@@ -43,6 +43,7 @@ Include these files alongside lambda_function.py when deploying:
   - tables/alldata.py
   - tables/qc_report.py
   - tables/gtd_targets.py
+  - tables/study_metrics.py
   - reporter_lib/heal_award_segmenter_lib.py   (required by tables/reporter.py)
   - reporter_lib/reporter_dd.csv               (optional; controls column types)
 
@@ -90,6 +91,7 @@ from tables.engagement_flags import update_engagement_flags
 from tables.alldata import update_alldata
 from tables.qc_report import update_qc_report
 from tables.gtd_targets import update_gtd_targets
+from tables.study_metrics import update_study_metrics
 
 load_dotenv()
 
@@ -455,6 +457,26 @@ def _run_gtd_targets():
     return result
 
 
+def _run_study_metrics():
+    # mysql_merged: ALWAYS tempspace. study_lookup_table follows
+    # DB_ENVIRONMENT. Writes no MySQL table -- fills a hand-maintained
+    # template .xlsx (manual input, like research_networks' workbook) and
+    # writes the result to S3 as a report.
+    mysql_merged_conn = connect_mysql(database=TEMPSPACE_DB_NAME)
+    study_lookup_conn = connect_mysql(database=_resolve_db_name("study_lookup_table"))
+    manual_inputs_source = S3ExcelSource(f"s3://{S3_BUCKET}/{MANUAL_INPUTS_PREFIX}")
+    report_source = S3ExcelSource(f"s3://{S3_BUCKET}/{REPORTS_PREFIX}")
+
+    try:
+        result = update_study_metrics(
+            mysql_merged_conn, study_lookup_conn, manual_inputs_source, report_source,
+        )
+    finally:
+        mysql_merged_conn.close()
+        study_lookup_conn.close()
+    return result
+
+
 TABLE_REGISTRY = {
     "reporter":               _run_reporter,
     "heal_awards_reporter_sn": _run_heal_awards_reporter_sn,  # must run after reporter
@@ -468,6 +490,7 @@ TABLE_REGISTRY = {
     "study_summary":          _run_study_summary,              # must run after reporter_dqaudit + engagement_flags (+ study_lookup_table, once finalized)
     "qc_report":              _run_qc_report,                  # must run after mysql_merge + study_lookup_table; writes a report, no MySQL table
     "gtd_targets":            _run_gtd_targets,                # must run after alldata; writes a report, no MySQL table
+    "study_metrics":          _run_study_metrics,              # must run after mysql_merge + study_lookup_table; writes a report, no MySQL table
     # Future tables — add entries here, e.g.:
     # "awards":           _run_awards,
 }
