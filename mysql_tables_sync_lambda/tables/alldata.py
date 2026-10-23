@@ -142,6 +142,13 @@ def build_alldata(
     # beyond what study_lookup_table already assigns).
     pi_emails_key = _build_pi_emails(study_lookup_df, pi_emails_df).rename(columns={"pi_email": "study_pi_email"})
     res_net_key = _build_resnet(study_lookup_df, research_networks_df).rename(columns={"res_net": "study_res_net"})
+    # research_networks' raw res_net isn't normalized to upper case the way
+    # mysql_merge.py's own res_net column is (mirrors HEAL_02's "replace
+    # res_net=upper(res_net)"); the original HEAL_06 script got this for
+    # free by deriving study_res_net from the already-uppercased
+    # mysql_merged column. study_summary.py applies the same fix locally
+    # after calling this shared helper -- mirror it here too.
+    res_net_key["study_res_net"] = res_net_key["study_res_net"].str.upper()
     live_arch_key = (
         progress_tracker_df[["hdp_id", "archived"]]
         .rename(columns={"hdp_id": "study_hdp_id", "archived": "study_hdp_status"})
