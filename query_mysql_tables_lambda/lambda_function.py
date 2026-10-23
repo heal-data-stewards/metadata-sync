@@ -66,8 +66,13 @@ _NO_DB_QUERIES = {"get_download_url", "trigger_regenerate"}
 
 _HEADERS = {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
 }
+# CORS is handled by the Lambda Function URL's own CORS configuration
+# (AWS resource-level setting), not here. query_mysql_tables_test already
+# has it configured; setting Access-Control-Allow-Origin in this response
+# too produces a duplicate header ("*, *"), which browsers reject outright
+# -- confirmed against the real error. Configure CORS on the production
+# query_mysql_tables Function URL the same way instead of re-adding this.
 
 
 def _resolve_query_name(event):
