@@ -23,6 +23,8 @@ import re
 
 import pandas as pd
 
+from db import clean_mysql_value, format_mysql_write_value
+
 logger = logging.getLogger(__name__)
 
 REF_WORKBOOK_NAME = "HEAL_research_networks_ref_table_for_MySQL.xlsx"
@@ -45,6 +47,8 @@ def _read_table(conn, table: str) -> pd.DataFrame:
     cols = [d[0] for d in cur.description]
     df = pd.DataFrame(cur.fetchall(), columns=cols)
     cur.close()
+    for col in df.columns:
+        df[col] = df[col].map(clean_mysql_value)
     if "appl_id" in df.columns:
         df["appl_id"] = df["appl_id"].astype(str)
     return df
@@ -82,8 +86,12 @@ def _write_research_networks(conn, df: pd.DataFrame, table: str) -> None:
 
     placeholders = ", ".join(["%s"] * len(mysql_cols))
     col_list = ", ".join(f"`{c}`" for c in mysql_cols)
+    def _row_value(v):
+        formatted = format_mysql_write_value(v)
+        return None if (formatted is None or formatted.strip() == "") else formatted
+
     rows = [
-        tuple(None if (pd.isna(v) or str(v).strip() == "") else str(v) for v in row)
+        tuple(_row_value(v) for v in row)
         for _, row in df.iterrows()
     ]
     cur.executemany(f"INSERT INTO `{table}` ({col_list}) VALUES ({placeholders})", rows)

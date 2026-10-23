@@ -28,6 +28,8 @@ import os
 import numpy as np
 import pandas as pd
 
+from db import clean_mysql_value, format_mysql_write_value
+
 logger = logging.getLogger(__name__)
 
 REPORTER_DQAUDIT_TABLE = "reporter_dqaudit"
@@ -53,6 +55,8 @@ def _read_table(conn, table: str) -> pd.DataFrame:
     cols = [d[0] for d in cur.description]
     df = pd.DataFrame(cur.fetchall(), columns=cols)
     cur.close()
+    for col in df.columns:
+        df[col] = df[col].map(clean_mysql_value)
     if "appl_id" in df.columns:
         df["appl_id"] = df["appl_id"].astype(str)
     return df
@@ -70,7 +74,7 @@ def _write_table(conn, df: pd.DataFrame, table: str) -> None:
     placeholders = ", ".join(["%s"] * len(mysql_cols))
     col_list = ", ".join(f"`{c}`" for c in mysql_cols)
     rows = [
-        tuple(None if pd.isna(v) else str(v) for v in row)
+        tuple(format_mysql_write_value(v) for v in row)
         for _, row in df.iterrows()
     ]
     cur.executemany(f"INSERT INTO `{table}` ({col_list}) VALUES ({placeholders})", rows)
