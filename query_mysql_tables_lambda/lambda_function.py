@@ -66,6 +66,7 @@ _NO_DB_QUERIES = {"get_download_url", "trigger_regenerate"}
 
 _HEADERS = {
     "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
 }
 
 
