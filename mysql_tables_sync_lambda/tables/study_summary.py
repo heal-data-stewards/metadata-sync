@@ -16,6 +16,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from db import clean_mysql_value, format_mysql_write_value
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -119,12 +121,8 @@ def _read_table(conn, table: str) -> pd.DataFrame:
     cols = [d[0] for d in cur.description]
     df = pd.DataFrame(cur.fetchall(), columns=cols)
     cur.close()
-    # MySQL SET columns are returned as Python sets by mysql.connector; flatten to strings.
     for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].apply(
-                lambda v: ",".join(sorted(v)) if isinstance(v, set) else v
-            )
+        df[col] = df[col].map(clean_mysql_value)
     if "appl_id" in df.columns:
         df["appl_id"] = df["appl_id"].astype(str)
     return df
@@ -138,6 +136,14 @@ def _create_subset(df: pd.DataFrame, extra_fields: list, rename_dict: dict) -> p
 
 
 def _build_pi_emails(gt_file: pd.DataFrame, pi_emails_df: pd.DataFrame) -> pd.DataFrame:
+    """Study-level PI email, one row per study_most_recent_appl.
+
+    Shared with tables/alldata.py. If 2+ appl_ids in a study have
+    different non-blank emails and none of them is the study's
+    most-recent appl_id, this deliberately resolves to no email for that
+    study (ambiguous) rather than picking one arbitrarily or letting a
+    later merge multiply rows.
+    """
     appl_ids = gt_file[["appl_id", "study_most_recent_appl"]].drop_duplicates()
     merged = pd.merge(appl_ids, pi_emails_df, how="left", on="appl_id")
     merged["pi_email"] = merged["pi_email"].fillna("")
@@ -166,10 +172,26 @@ def _build_pi_emails(gt_file: pd.DataFrame, pi_emails_df: pd.DataFrame) -> pd.Da
 
 
 def _build_resnet(gt_file: pd.DataFrame, resnet_df: pd.DataFrame) -> pd.DataFrame:
+    """Study-level research network, one row per study_most_recent_appl.
+
+    Shared with tables/alldata.py (its own per-award res_net stays
+    separate -- this is specifically the study-level derived value).
+    "NULL"/"None"/"nan" string sentinels (left over from the Stata/CSV-era
+    pipeline) are treated the same as a real missing value. Guarantees
+    exactly one row per study even if two appl_ids in it genuinely carry
+    different non-blank res_net values -- picks the first one found,
+    rather than letting a later merge on study_most_recent_appl silently
+    multiply rows.
+    """
     appl_ids = gt_file[["appl_id", "study_most_recent_appl"]].drop_duplicates()
-    added    = pd.merge(appl_ids, resnet_df[["appl_id", "res_net"]], how="left", on="appl_id")
-    has_net  = added[~pd.isna(added["res_net"])][["study_most_recent_appl", "res_net"]]
-    updated  = pd.merge(appl_ids, has_net, how="left", on="study_most_recent_appl")
+    added = pd.merge(appl_ids, resnet_df[["appl_id", "res_net"]], how="left", on="appl_id")
+
+    res_net_str = added["res_net"].astype(str).str.strip()
+    is_real = added["res_net"].notna() & ~res_net_str.isin(["", "nan", "NULL", "None"])
+    has_net = added[is_real][["study_most_recent_appl", "res_net"]].drop_duplicates()
+    has_net = has_net.drop_duplicates(subset="study_most_recent_appl", keep="first")
+
+    updated = pd.merge(appl_ids, has_net, how="left", on="study_most_recent_appl")
     return updated[["study_most_recent_appl", "res_net"]].drop_duplicates()
 
 
@@ -177,10 +199,36 @@ def _build_resnet(gt_file: pd.DataFrame, resnet_df: pd.DataFrame) -> pd.DataFram
 # Build function
 # ---------------------------------------------------------------------------
 
-def _build_study_summary(conn) -> pd.DataFrame:
-    """Read all source tables and return the denormalized study summary DataFrame."""
+def _build_study_summary(
+    conn,
+    reporter_conn=None,
+    research_networks_conn=None,
+    reporter_dqaudit_conn=None,
+    study_lookup_table_conn=None,
+    engagement_flags_conn=None,
+) -> pd.DataFrame:
+    """
+    Read all source tables and return the denormalized study summary DataFrame.
+
+    reporter_conn/research_networks_conn/reporter_dqaudit_conn/
+    study_lookup_table_conn/engagement_flags_conn: separate connections for
+    the five source tables *this lambda itself builds* (reporter,
+    research_networks, reporter_dqaudit, study_lookup_table,
+    engagement_flags), which can live in a different database than
+    everything else here under the tempspace/healstudies split -- default
+    to `conn` so callers that don't care (everything stays in one
+    database) are unaffected. The other 4 source tables (awards,
+    progress_tracker, pi_emails, po_emails) are either genuinely external
+    or not yet ported, so they always read via `conn`.
+    """
+    reporter_conn = reporter_conn or conn
+    research_networks_conn = research_networks_conn or conn
+    reporter_dqaudit_conn = reporter_dqaudit_conn or conn
+    study_lookup_table_conn = study_lookup_table_conn or conn
+    engagement_flags_conn = engagement_flags_conn or conn
+
     logger.info("Reading source tables from MySQL")
-    gt_file = _read_table(conn, "study_lookup_table")
+    gt_file = _read_table(study_lookup_table_conn, "study_lookup_table")
     gt_file.replace("0", np.nan, inplace=True)
     logger.info("  study_lookup_table: %d rows", len(gt_file))
 
@@ -190,9 +238,9 @@ def _build_study_summary(conn) -> pd.DataFrame:
     logger.info("Unique study keys: %d", len(lf))
 
     awards_df   = _read_table(conn, "awards").dropna(how="all")
-    reporter_df = _read_table(conn, "reporter").dropna(how="all")
+    reporter_df = _read_table(reporter_conn, "reporter").dropna(how="all")
     try:
-        rpt_dq = _read_table(conn, "reporter_dqaudit").dropna(how="all")
+        rpt_dq = _read_table(reporter_dqaudit_conn, "reporter_dqaudit").dropna(how="all")
         reporter_df = pd.concat([reporter_df, rpt_dq], ignore_index=True)
         logger.info("  reporter + reporter_dqaudit combined: %d rows", len(reporter_df))
     except Exception:
@@ -200,8 +248,8 @@ def _build_study_summary(conn) -> pd.DataFrame:
 
     progress_tracker_df = _read_table(conn, "progress_tracker")
     pi_emails_df        = _read_table(conn, "pi_emails")
-    resnet_df           = _read_table(conn, "research_networks")
-    engagement_df       = _read_table(conn, "engagement_flags")
+    resnet_df           = _read_table(research_networks_conn, "research_networks")
+    engagement_df       = _read_table(engagement_flags_conn, "engagement_flags")
     po_emails_df        = _read_table(conn, "po_emails")
     logger.info("All source tables loaded")
 
@@ -267,6 +315,31 @@ def _build_study_summary(conn) -> pd.DataFrame:
     logger.info("New CTN studies not in lookup table: %d", len(ctn_fields_new))
 
     result = pd.concat([filled, ctn_fields_new], ignore_index=True)
+
+    # Add non-CTN HDP studies that have an hdp_id but no appl_id (Intramural/ZIA,
+    # ICPSR, non-NIH-funded, etc.).  Same fill pattern as CTN above: pull directly
+    # from progress_tracker so Title, PI, Project # etc. are populated.
+    # The existing_keys check prevents duplicates for studies already in the
+    # lookup table; this also acts as a safety net before HEAL_04 is rerun.
+    no_appl_mask = (
+        ~pt["project_num"].str.startswith("CTN", na=False) &
+        (pt["appl_id"].isna() | pt["appl_id"].isin(["", "0"])) &
+        pt["hdp_id"].notna() & (pt["hdp_id"].astype(str) != "")
+    )
+    no_appl_rows = pt[no_appl_mask].copy()
+    logger.info("Non-CTN no-appl-id HDP studies from progress_tracker: %d", len(no_appl_rows))
+    no_appl_fields = _create_subset(no_appl_rows, ["hdp_id"], RENAME_DICT_CTN)
+    no_appl_fields["PI(s)"] = no_appl_fields["PI(s)"].fillna("").apply(
+        lambda k: k.translate(str.maketrans(",", ";", "[]\'"))
+    )
+    no_appl_fields["key"]          = no_appl_fields["hdp_id"]
+    no_appl_fields["study_hdp_id"] = no_appl_fields["hdp_id"]
+
+    existing_keys_post_ctn = set(result["key"].dropna())
+    no_appl_fields_new = no_appl_fields[~no_appl_fields["key"].isin(existing_keys_post_ctn)]
+    logger.info("New non-CTN no-appl-id studies not yet in table: %d", len(no_appl_fields_new))
+
+    result = pd.concat([result, no_appl_fields_new], ignore_index=True)
     logger.info("Combined before encoding: %d rows", len(result))
     return result
 
@@ -290,11 +363,13 @@ def _prepare_for_mysql(df: pd.DataFrame) -> pd.DataFrame:
     """
     d = df.copy()
 
-    # study_type: 'CTN' / 'APPLIDONLY' / 'HDP'
+    # study_type: 'CTN' / 'HDP' / 'APPLIDONLY'
+    # Use study_hdp_id (not study_hdp_id_appl) so that studies with an HDP ID but no
+    # appl_id (Intramural/ZIA, ICPSR, non-NIH-funded) are still classified as "HDP".
     d["study_type"] = [
         "CTN" if str(p).startswith("CTN")
-        else ("APPLIDONLY" if pd.isna(k) else "HDP")
-        for p, k in d[["Project #", "study_hdp_id_appl"]].values
+        else ("HDP" if (pd.notna(h) and str(h).strip() not in ("", "nan")) else "APPLIDONLY")
+        for p, h in d[["Project #", "study_hdp_id"]].values
     ]
 
     # Location: City, State
@@ -351,8 +426,13 @@ def _write_study_summary(conn, df: pd.DataFrame, table: str) -> None:
 
     placeholders = ", ".join(["%s"] * len(mysql_cols))
     col_list = ", ".join(f"`{c}`" for c in mysql_cols)
+
+    def _row_value(v):
+        formatted = format_mysql_write_value(v)
+        return None if (formatted is None or formatted.strip() == "") else formatted
+
     rows = [
-        tuple(None if (pd.isna(v) or str(v).strip() == "") else str(v) for v in row)
+        tuple(_row_value(v) for v in row)
         for _, row in df.iterrows()
     ]
     cur.executemany(f"INSERT INTO `{table}` ({col_list}) VALUES ({placeholders})", rows)
@@ -365,22 +445,42 @@ def _write_study_summary(conn, df: pd.DataFrame, table: str) -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def update_study_summary(conn, target_table: str | None = None) -> dict:
+def update_study_summary(
+    conn,
+    target_table: str | None = None,
+    reporter_conn=None,
+    research_networks_conn=None,
+    reporter_dqaudit_conn=None,
+    study_lookup_table_conn=None,
+    engagement_flags_conn=None,
+) -> dict:
     """
     Rebuild the study_summary table from all source MySQL tables.
 
     Args:
-        conn:         mysql.connector connection (from db.connect_mysql()).
+        conn:         mysql.connector connection (from db.connect_mysql()),
+                      used for study_summary's own write and for the 4
+                      source tables that aren't built by this lambda.
         target_table: Table name to write; defaults to STUDY_SUMMARY_TABLE_NAME
-                      env var or 'study_summary_test'.
+                      env var or 'study_summary'.
+        reporter_conn / research_networks_conn / reporter_dqaudit_conn /
+        study_lookup_table_conn / engagement_flags_conn: see
+                      _build_study_summary(). Default to `conn` if not given.
 
     Returns:
         dict with keys: table, rows_written
     """
     import os
     if target_table is None:
-        target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary_test")
-    df = _build_study_summary(conn)
+        target_table = os.getenv("STUDY_SUMMARY_TABLE_NAME", "study_summary")
+    df = _build_study_summary(
+        conn,
+        reporter_conn=reporter_conn,
+        research_networks_conn=research_networks_conn,
+        reporter_dqaudit_conn=reporter_dqaudit_conn,
+        engagement_flags_conn=engagement_flags_conn,
+        study_lookup_table_conn=study_lookup_table_conn,
+    )
     df = _prepare_for_mysql(df)
     _write_study_summary(conn, df, target_table)
     return {"table": target_table, "rows_written": len(df)}
