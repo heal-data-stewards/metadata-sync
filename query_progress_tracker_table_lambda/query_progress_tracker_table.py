@@ -30,8 +30,6 @@ db_password = os.getenv('DB_PASSWORD')
 db_host     = os.getenv('DB_HOST')
 db_database = os.getenv('DB_NAME')
 table_name  = os.getenv('TABLE_NAME')
-# Same table + fallback used by mysql_tables_sync_lambda and query_mysql_tables_lambda.
-study_summary_table_name = os.getenv('STUDY_SUMMARY_TABLE_NAME', 'study_summary_test')
 
 _HEADERS = {
     "Content-Type": "application/json",
@@ -55,7 +53,7 @@ def _count(cursor, table, where):
 # Dashboard metrics query
 # ---------------------------------------------------------------------------
 
-def get_dashboard_metrics(conn, table, study_summary_table=study_summary_table_name):
+def get_dashboard_metrics(conn, table):
     """
     Returns aggregate counts from progress_tracker for the HEAL dashboard.
 
@@ -146,25 +144,6 @@ def get_dashboard_metrics(conn, table, study_summary_table=study_summary_table_n
     """)
     repositories = [{"name": r[0], "count": r[1]} for r in cur.fetchall()]
 
-    # ── Research network breakdown (from study_summary) ──────────────────────
-    # Was monday_studies_mysql (populated by monday_studies_lambda), repointed
-    # at study_summary.research_network 2026-10-12 -- same values (uppercase
-    # network codes, 'CTN' literal), built by mysql_tables_sync_lambda instead.
-    # Kept defensive: a broken breakdown query must not 500 the whole endpoint.
-    try:
-        cur.execute(f"""
-            SELECT research_network, COUNT(*) AS cnt
-            FROM {study_summary_table}
-            WHERE research_network IS NOT NULL
-              AND research_network != ''
-              AND research_network != '-'
-            GROUP BY research_network
-            ORDER BY cnt DESC
-        """)
-        research_networks = [{"name": r[0], "count": int(r[1])} for r in cur.fetchall()]
-    except Exception:
-        research_networks = []
-
     cur.close()
 
     return {
@@ -192,7 +171,6 @@ def get_dashboard_metrics(conn, table, study_summary_table=study_summary_table_n
         "cedar_complete":       cedar_complete,
         "cde_studies":          studies_with_cdes,
         "repositories":         repositories,
-        "research_networks":    research_networks,
     }
 
 

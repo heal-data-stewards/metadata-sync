@@ -6,7 +6,11 @@ research_networks, engagement_flags, and po_emails into one denormalized
 row per study (keyed by HDPID / appl_id).
 
 This replaces the old monday_studies_mysql table. The table name is
-configurable via STUDY_SUMMARY_TABLE_NAME env var (default: study_summary_test).
+configurable via STUDY_SUMMARY_TABLE_NAME env var (default: study_summary).
+Unlike the tables it reads from (reporter, research_networks, etc.), this
+table's own database is always just DB_NAME -- it is NOT part of the
+tempspace/healstudies split (see _run_study_summary() in lambda_function.py;
+_resolve_db_name() is never called for "study_summary" itself).
 """
 
 import logging
